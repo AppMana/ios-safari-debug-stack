@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  source-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.23
+      - name: Python CLI tests
+        run: python3 -m unittest discover -s tests -v
+      - name: CDP bridge tests
+        working-directory: third_party/inspect-webkit
+        run: bun test
+
+  package:
+    name: Ubuntu ${{ matrix.ubuntu }} / amd64
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: ["24.04", "26.04"]
+    container: ubuntu:${{ matrix.ubuntu }}
+    steps:
+      - name: Install build tools
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y \
+            autoconf automake build-essential debhelper devscripts dpkg-dev \
+            esbuild libimobiledevice-dev libplist-dev libssl-dev libtool \
+            libusb-1.0-0-dev libusbmuxd-dev lintian nodejs pkg-config python3
+      - uses: actions/checkout@v4
+      - name: Build package
+        env:
+          DEBFULLNAME: AppMana Engineering
+          DEBEMAIL: engineering@appmana.com
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          base_version=$(dpkg-parsechangelog -S Version)
+          dch --newversion "${base_version}+ubuntu${{ matrix.ubuntu }}.1" \
+            --distribution "ubuntu${{ matrix.ubuntu }}" \
+            "Automated Ubuntu ${{ matrix.ubuntu }} build."
+          dpkg-buildpackage -us -uc -b
+      - name: Inspect package
+        run: |
+          package=$(find .. -maxdepth 1 -name 'ios-safari-debug-stack_*.deb' -print -quit)
+          test -n "$package"
+          dpkg-deb --info "$package"
+          dpkg-deb --contents "$package" >/dev/null
+          lintian --fail-on error "$package"

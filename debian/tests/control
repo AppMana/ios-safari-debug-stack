@@ -1,0 +1,3 @@
+Tests: installed-smoke
+Depends: @, curl
+Restrictions: superficial

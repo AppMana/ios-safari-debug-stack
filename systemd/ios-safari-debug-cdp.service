@@ -1,0 +1,28 @@
+[Unit]
+Description=iOS Safari Chrome DevTools Protocol bridge
+Documentation=https://github.com/AppMana/ios-safari-debug-stack
+Wants=usbmuxd.service
+After=usbmuxd.service
+Conflicts=ios-safari-debug-wip.service ios-safari-debug-ui.service
+
+[Service]
+Type=simple
+User=ios-safari-debug
+Group=ios-safari-debug
+SupplementaryGroups=plugdev
+ExecStart=/usr/bin/ios-safari-cdp-bridge --host 127.0.0.1 --port 9333
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

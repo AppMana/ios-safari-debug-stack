@@ -1,0 +1,24 @@
+[Unit]
+Description=Bundled Web Inspector UI for iOS Safari
+Documentation=https://github.com/AppMana/ios-safari-debug-stack
+Requires=ios-safari-debug-wip.service
+After=ios-safari-debug-wip.service
+Conflicts=ios-safari-debug-cdp.service
+
+[Service]
+Type=simple
+User=ios-safari-debug
+Group=ios-safari-debug
+ExecStart=/usr/bin/python3 -m http.server 8080 --bind 127.0.0.1 --directory /usr/share/ios-safari-debug-stack/web-inspector
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_INET
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

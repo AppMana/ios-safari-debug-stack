@@ -1,0 +1,39 @@
+Source: ios-safari-debug-stack
+Section: devel
+Priority: optional
+Maintainer: AppMana Engineering <engineering@appmana.com>
+Build-Depends:
+ debhelper-compat (= 13),
+ autoconf,
+ automake,
+ esbuild,
+ libimobiledevice-dev,
+ libplist-dev,
+ libssl-dev,
+ libtool,
+ libusb-1.0-0-dev,
+ libusbmuxd-dev,
+ pkg-config,
+ python3,
+Standards-Version: 4.7.0
+Homepage: https://github.com/AppMana/ios-safari-debug-stack
+Vcs-Browser: https://github.com/AppMana/ios-safari-debug-stack
+Vcs-Git: https://github.com/AppMana/ios-safari-debug-stack.git
+Rules-Requires-Root: no
+
+Package: ios-safari-debug-stack
+Architecture: any
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
+ libimobiledevice-utils,
+ nodejs (>= 18.19),
+ python3,
+ systemd-sysusers,
+ usbmuxd,
+Recommends: xdg-utils
+Description: USB debugging stack for Mobile Safari on Ubuntu
+ Installs a local-only WebKit Inspector proxy for iwdp-mcp, an optional
+ WebKit-to-Chrome DevTools Protocol bridge, diagnostics, systemd services,
+ and a bundled browser-based Web Inspector. It uses Ubuntu's usbmuxd and
+ libimobiledevice packages to communicate with trusted iOS and iPadOS devices.

@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+ios-safari-debug version
+ios-safari-debug backend get >/dev/null
+ios_webkit_debug_proxy --version
+ios-safari-cdp-bridge --help >/dev/null
+test -f /usr/share/ios-safari-debug-stack/web-inspector/Main.html
+test -f /usr/lib/systemd/system/ios-safari-debug-wip.service
+test -f /usr/lib/systemd/system/ios-safari-debug-cdp.service
+test -f /usr/lib/systemd/system/ios-safari-debug-ui.service

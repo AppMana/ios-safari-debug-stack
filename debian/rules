@@ -1,0 +1,49 @@
+#!/usr/bin/make -f
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+export DEB_CFLAGS_MAINT_APPEND = -Wno-error
+
+BUILD_DIR := $(CURDIR)/debian/build
+PKG_DIR := $(CURDIR)/debian/ios-safari-debug-stack
+
+%:
+	dh $@
+
+override_dh_auto_clean:
+	dh_auto_clean
+	rm -rf $(BUILD_DIR)
+	mkdir -p $(BUILD_DIR)
+
+override_dh_auto_configure:
+	mkdir -p $(BUILD_DIR)
+	cp -a third_party/ios-webkit-debug-proxy $(BUILD_DIR)/iwdp
+	cd $(BUILD_DIR)/iwdp && ./autogen.sh --prefix=/usr
+
+override_dh_auto_build:
+	$(MAKE) -C $(BUILD_DIR)/iwdp
+	esbuild third_party/inspect-webkit/bin/cli.ts \
+		--bundle --platform=node --target=node18 \
+		--external:bufferutil --external:utf-8-validate \
+		--outfile=$(BUILD_DIR)/ios-safari-cdp-bridge
+	chmod 0755 $(BUILD_DIR)/ios-safari-cdp-bridge
+
+override_dh_auto_test:
+	python3 -m unittest discover -s tests -v
+	$(BUILD_DIR)/iwdp/src/ios_webkit_debug_proxy --version
+	/usr/bin/node $(BUILD_DIR)/ios-safari-cdp-bridge --help >/dev/null
+	timeout 2s /usr/bin/node $(BUILD_DIR)/ios-safari-cdp-bridge --host 127.0.0.1 --port 19333 >/dev/null 2>&1; status=$$?; test $$status -eq 124
+
+override_dh_auto_install:
+	install -D -m 0755 $(BUILD_DIR)/iwdp/src/ios_webkit_debug_proxy $(PKG_DIR)/usr/bin/ios_webkit_debug_proxy
+	install -D -m 0755 $(BUILD_DIR)/ios-safari-cdp-bridge $(PKG_DIR)/usr/bin/ios-safari-cdp-bridge
+	install -D -m 0755 src/ios_safari_debug.py $(PKG_DIR)/usr/bin/ios-safari-debug
+	install -D -m 0644 VERSION.json $(PKG_DIR)/usr/share/ios-safari-debug-stack/VERSION.json
+	install -d $(PKG_DIR)/usr/share/ios-safari-debug-stack/web-inspector
+	cp -a third_party/web-inspector-ui/. $(PKG_DIR)/usr/share/ios-safari-debug-stack/web-inspector/
+	install -D -m 0644 systemd/ios-safari-debug-wip.service $(PKG_DIR)/usr/lib/systemd/system/ios-safari-debug-wip.service
+	install -D -m 0644 systemd/ios-safari-debug-cdp.service $(PKG_DIR)/usr/lib/systemd/system/ios-safari-debug-cdp.service
+	install -D -m 0644 systemd/ios-safari-debug-ui.service $(PKG_DIR)/usr/lib/systemd/system/ios-safari-debug-ui.service
+	install -D -m 0644 systemd/ios-safari-debug-stack.sysusers $(PKG_DIR)/usr/lib/sysusers.d/ios-safari-debug-stack.conf
+
+override_dh_installsystemd:
+	dh_installsystemd --no-enable --no-start

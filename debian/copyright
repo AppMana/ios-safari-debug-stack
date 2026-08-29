@@ -1,0 +1,59 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: ios-safari-debug-stack
+Source: https://github.com/AppMana/ios-safari-debug-stack
+
+Files: src/* systemd/* debian/* tests/* scripts/*
+Copyright: 2026 AppMana
+License: GPL-3+
+
+Files: third_party/ios-webkit-debug-proxy/*
+Copyright: 2012 Google Inc.
+License: BSD-3-clause
+
+Files: third_party/inspect-webkit/*
+Copyright: 2026 Evan Bacon and contributors
+License: MIT
+
+Files: third_party/ios-safari-remote-debug-kit/*
+Copyright: HimbeersaftLP and contributors
+License: GPL-3
+
+Files: third_party/web-inspector-ui/*
+Copyright: Apple Inc., WebKit contributors, and embedded third-party authors
+License: BSD-2-clause and BSD-3-clause and MIT
+Comment:
+ Individual source files retain their upstream copyright and license headers.
+ Embedded CodeMirror, Esprima, three.js, and CSS documentation license files
+ are distributed alongside their respective sources.
+
+License: GPL-3+
+ This program is free software: you can redistribute it and/or modify it under
+ the terms of the GNU General Public License as published by the Free Software
+ Foundation, either version 3 of the License, or (at your option) any later
+ version.
+ .
+ On Debian systems, the complete text is available in
+ /usr/share/common-licenses/GPL-3.
+
+License: GPL-3
+ This program is free software under version 3 of the GNU General Public
+ License.
+ .
+ On Debian systems, the complete text is available in
+ /usr/share/common-licenses/GPL-3.
+
+License: BSD-3-clause
+ Redistribution and use in source and binary forms, with or without
+ modification, are permitted provided that the three-clause BSD conditions
+ in the corresponding upstream license file are met.
+
+License: BSD-2-clause
+ Redistribution and use in source and binary forms, with or without
+ modification, are permitted provided that the two-clause BSD conditions in
+ the corresponding source headers are met.
+
+License: MIT
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files, to deal in the Software
+ without restriction, subject to the conditions in the corresponding upstream
+ license file.

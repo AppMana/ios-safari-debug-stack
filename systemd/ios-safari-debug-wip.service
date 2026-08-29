@@ -1,0 +1,29 @@
+[Unit]
+Description=iOS Safari raw WebKit Inspector proxy
+Documentation=https://github.com/AppMana/ios-safari-debug-stack
+Wants=usbmuxd.service
+After=usbmuxd.service
+Conflicts=ios-safari-debug-cdp.service
+
+[Service]
+Type=simple
+User=ios-safari-debug
+Group=ios-safari-debug
+SupplementaryGroups=plugdev
+ExecStart=/usr/bin/ios_webkit_debug_proxy --no-frontend
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

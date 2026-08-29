@@ -1,0 +1,13 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "remove" ] && [ -d /run/systemd/system ]; then
+    systemctl disable --now \
+        ios-safari-debug-cdp.service \
+        ios-safari-debug-ui.service \
+        ios-safari-debug-wip.service || true
+fi
+
+#DEBHELPER#
+
+exit 0

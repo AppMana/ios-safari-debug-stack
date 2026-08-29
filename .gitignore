@@ -1,0 +1,17 @@
+/debian/.debhelper/
+/debian/build/
+/debian/debhelper-build-stamp
+/debian/files
+/debian/ios-safari-debug-stack/
+/debian/ios-safari-debug-stack.debhelper.log
+/debian/*.debhelper
+/debian/ios-safari-debug-stack.substvars
+/*.build
+/*.buildinfo
+/*.changes
+/*.deb
+/*.dsc
+/*.tar.*
+/.cache/
+__pycache__/
+*.pyc

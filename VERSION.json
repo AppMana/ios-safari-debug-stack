@@ -1,0 +1,6 @@
+{
+  "stack": "0.1.0",
+  "ios_webkit_debug_proxy": "1.9.2+appmana1",
+  "inspect_webkit": "0.0.5+appmana1",
+  "web_inspector_commit": "37082295192386f21f8e17f4e8295e18f61c1da3"
+}

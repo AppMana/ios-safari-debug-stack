@@ -1,0 +1,92 @@
+name: Release packages
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ubuntu: "24.04"
+            runner: ubuntu-24.04
+            arch: amd64
+          - ubuntu: "24.04"
+            runner: ubuntu-24.04-arm
+            arch: arm64
+          - ubuntu: "26.04"
+            runner: ubuntu-24.04
+            arch: amd64
+          - ubuntu: "26.04"
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    container: ubuntu:${{ matrix.ubuntu }}
+    steps:
+      - name: Install build tools
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y \
+            autoconf automake build-essential debhelper devscripts dpkg-dev \
+            esbuild libimobiledevice-dev libplist-dev libssl-dev libtool \
+            libusb-1.0-0-dev libusbmuxd-dev lintian nodejs pkg-config python3
+      - uses: actions/checkout@v4
+      - name: Build target package
+        env:
+          DEBFULLNAME: AppMana Engineering
+          DEBEMAIL: engineering@appmana.com
+        run: |
+          test "$(dpkg --print-architecture)" = "${{ matrix.arch }}"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          base_version=$(dpkg-parsechangelog -S Version)
+          dch --newversion "${base_version}+ubuntu${{ matrix.ubuntu }}.1" \
+            --distribution "ubuntu${{ matrix.ubuntu }}" \
+            "Release build for Ubuntu ${{ matrix.ubuntu }} ${{ matrix.arch }}."
+          dpkg-buildpackage -us -uc -b
+          mkdir artifacts
+          cp ../ios-safari-debug-stack_*.deb artifacts/
+          lintian --fail-on error artifacts/*.deb
+      - uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: artifacts/*.deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-ubuntu-${{ matrix.ubuntu }}-${{ matrix.arch }}
+          path: artifacts/*.deb
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: deb-*
+          path: release
+          merge-multiple: true
+      - name: Create checksums
+        working-directory: release
+        run: sha256sum *.deb > SHA256SUMS
+      - name: Create SPDX package SBOMs
+        run: |
+          for package in release/*.deb; do
+            python3 scripts/generate_sbom.py "$package" "${package%.deb}.spdx.json"
+          done
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --generate-notes \
+            release/*.deb release/*.spdx.json release/SHA256SUMS
