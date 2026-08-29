@@ -59,6 +59,12 @@ npx -y chrome-devtools-mcp@1.8.0 \
   --browserUrl=http://127.0.0.1:9333
 ```
 
+Live-device verification covers page discovery, console messages, JavaScript
+evaluation, DOM/resource-tree inspection, and semantic `take_snapshot` output.
+The bridge translates Puppeteer's execution-context form of
+`Runtime.callFunctionOn` and synthesizes Chrome's accessibility tree from
+WebKit DOM data.
+
 Chrome can discover the same endpoint from `chrome://inspect` after adding
 `localhost:9333`. Return to the reliable raw backend with:
 
@@ -89,6 +95,9 @@ inspector connection per page.
 - `inspect-webkit` is forced to preserve loopback binding and excludes Safari
   extension/background targets by default. Those targets caused Puppeteer and
   Chrome DevTools MCP to auto-attach and fail during `Network.enable`.
+- The CDP adapter translates Puppeteer's main/utility-world calls and builds a
+  resolvable semantic accessibility tree for MCP snapshots, although WebKit
+  has no native Chrome Accessibility domain.
 - The human frontend chooses the closest bundled iOS protocol definition from
   the connected device version, with no first-run Git checkout.
 
@@ -96,6 +105,9 @@ inspector connection per page.
 
 - Safari's protocol does not expose Chrome-equivalent response bodies or page
   screenshots. CDP clients receive explicit errors for unsupported commands.
+- MCP element snapshots are supported; Puppeteer-style point-and-click input
+  remains experimental because Safari does not provide Chrome's isolated-world
+  DOM adoption semantics. Use `evaluate_script` for deterministic interaction.
 - Canvas and some Timeline features remain limited in the human inspector.
 - Trust, unlock, and the Web Inspector device setting cannot be automated.
 - Appium RemoteXPC is not included in v1 because it requires a privileged

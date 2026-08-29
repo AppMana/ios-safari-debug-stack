@@ -97,9 +97,68 @@ export function installDomFilters(t: Target) {
   });
 
   // CDP DOM.resolveNode returns { object: RemoteObject }; WIR matches but
-  // some Safari versions reject objectGroup=undefined. Drop it if absent.
+  // calls the numeric key nodeId rather than backendNodeId. The synthetic
+  // accessibility tree deliberately uses WIR node ids as CDP backend ids.
   t.addMessageFilter("tools::DOM.resolveNode", (msg) => {
-    if (msg.params && msg.params.objectGroup === undefined) delete msg.params.objectGroup;
+    if (msg.params) {
+      if (msg.params.nodeId === undefined && typeof msg.params.backendNodeId === "number") {
+        msg.params.nodeId = msg.params.backendNodeId;
+      }
+      delete msg.params.backendNodeId;
+      delete msg.params.executionContextId;
+      if (msg.params.objectGroup === undefined) delete msg.params.objectGroup;
+    }
     return Promise.resolve(msg);
+  });
+
+  // WebKit has DOM.requestNode (object → node id) but not CDP's richer
+  // DOM.describeNode. Puppeteer uses describeNode to verify that locator
+  // handles are still connected, so synthesize the small Node shape it
+  // consumes from the live JavaScript object.
+  t.addMessageFilter("tools::DOM.describeNode", async (msg) => {
+    const objectId = msg.params?.objectId;
+    if (typeof objectId !== "string") {
+      t.fireErrorToTools(msg.id!, { message: "DOM.describeNode currently requires objectId" });
+      return null;
+    }
+    try {
+      const requested = await t.callTarget("DOM.requestNode", { objectId });
+      const nodeId = Number(requested?.nodeId) || 0;
+      const described = await t.callTarget("Runtime.callFunctionOn", {
+        objectId,
+        functionDeclaration: `function () {
+          return {
+            nodeType: Number(this.nodeType || 0),
+            nodeName: String(this.nodeName || ""),
+            localName: String(this.localName || ""),
+            nodeValue: String(this.nodeValue || ""),
+            childNodeCount: Number(this.childNodes?.length || 0),
+            attributes: this.attributes
+              ? Array.from(this.attributes, attribute => [attribute.name, attribute.value]).flat()
+              : [],
+          };
+        }`,
+        returnByValue: true,
+        doNotPauseOnExceptionsAndMuteConsole: true,
+      });
+      const info = described?.result?.value ?? {};
+      t.fireResultToTools(msg.id!, {
+        node: {
+          nodeId,
+          backendNodeId: nodeId,
+          nodeType: info.nodeType ?? 0,
+          nodeName: info.nodeName ?? "",
+          localName: info.localName ?? "",
+          nodeValue: info.nodeValue ?? "",
+          childNodeCount: info.childNodeCount ?? 0,
+          attributes: Array.isArray(info.attributes) ? info.attributes : [],
+        },
+      });
+    } catch (error) {
+      t.fireErrorToTools(msg.id!, {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return null;
   });
 }

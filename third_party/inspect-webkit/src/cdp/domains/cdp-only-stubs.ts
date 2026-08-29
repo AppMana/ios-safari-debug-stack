@@ -151,16 +151,10 @@ const CDP_ONLY_METHODS: Record<string, any> = {
   "DOM.copyTo": { nodeId: 0 },
   "DOM.collectClassNamesFromSubtree": { classNames: [] },
 
-  // CDP's Accessibility domain doesn't exist on WebKit (a11y info is on
-  // DOM.getAccessibilityProperties). chrome-devtools-mcp's take_snapshot
-  // calls Accessibility.getFullAXTree first thing — return an empty tree
-  // so the tool degrades gracefully instead of hard-erroring. Agents lose
-  // a11y-tree-based snapshots but still get DOM and JS evaluation.
-  "Accessibility.enable": {},
-  "Accessibility.disable": {},
-  "Accessibility.getFullAXTree": { nodes: [] },
+  // The Accessibility adapter owns enable/disable, partial trees, and the
+  // synthesized full tree. Keep only methods it does not yet translate as
+  // safe stubs here.
   "Accessibility.getRootAXNode": { node: null },
-  "Accessibility.getPartialAXTree": { nodes: [] },
   "Accessibility.queryAXTree": { nodes: [] },
   "Accessibility.getAXNodeAndAncestors": { nodes: [] },
   "Accessibility.getChildAXNodes": { nodes: [] },

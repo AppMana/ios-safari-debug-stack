@@ -24,7 +24,10 @@ export function installRuntimeFilters(t: Target, ctx: DomainCtx) {
         }
       }
       if (c.frameId) {
-        c.auxData = { frameId: c.frameId, isDefault: true };
+        // Only WebKit's normal page world is CDP's default realm. Marking
+        // Safari's internal/user worlds as default makes Puppeteer silently
+        // replace its frame realm and later pass cross-world object handles.
+        c.auxData = { frameId: c.frameId, isDefault: isPage };
         delete c.frameId;
       }
     }
@@ -191,16 +194,72 @@ export function installRuntimeFilters(t: Target, ctx: DomainCtx) {
   t.addMessageFilter("tools::Runtime.releaseObjectGroup", (msg) =>
     Promise.resolve(msg),
   );
-  // callFunctionOn: CDP and WIR agree on the param shape
-  // ({ objectId, functionDeclaration, arguments?, returnByValue?,
-  // generatePreview?, awaitPromise?, executionContextId?, objectGroup? }).
-  // The response mirrors Runtime.evaluate ({ result, wasThrown? }). We
-  // deliberately do NOT synthesize exceptionDetails on the way back — see
-  // the comment on target::Runtime.evaluate above; DevTools uses
-  // callFunctionOn for object previews and a fake error confuses it.
-  t.addMessageFilter("tools::Runtime.callFunctionOn", (msg) =>
-    Promise.resolve(msg),
-  );
+  // CDP permits callFunctionOn to identify the receiver with either objectId
+  // or executionContextId. WIR requires objectId. Puppeteer (and therefore
+  // chrome-devtools-mcp) uses executionContextId, so resolve that context's
+  // global object first and use it as the receiver.
+  t.addMessageFilter("tools::Runtime.callFunctionOn", async (msg) => {
+    const p = msg.params;
+    if (!p) return msg;
+
+    if (!p.objectId) {
+      let contextId = Number(p.executionContextId || ctx.pageExecCtx.id) || undefined;
+      // WIR's DOM.resolveNode cannot adopt a node into a requested execution
+      // context. Puppeteer therefore hands us a main-world node while asking
+      // to run in its utility world, which WebKit rejects as a cross-world
+      // argument. Use the world encoded in the first object argument so the
+      // receiver and arguments belong to the same injected script.
+      const argumentObjectId = p.arguments?.find(
+        (argument: any) => typeof argument?.objectId === "string",
+      )?.objectId;
+      if (argumentObjectId) {
+        try {
+          const injectedScriptId = Number(JSON.parse(argumentObjectId).injectedScriptId);
+          if (injectedScriptId) contextId = injectedScriptId;
+        } catch {
+          // Opaque object ids are valid; retain the requested context.
+        }
+      }
+      try {
+        const global = await t.callTarget("Runtime.evaluate", {
+          expression: "this",
+          ...(contextId ? { contextId } : {}),
+          ...(p.objectGroup ? { objectGroup: p.objectGroup } : {}),
+        });
+        const objectId = global?.result?.objectId;
+        if (typeof objectId !== "string") {
+          t.fireErrorToTools(msg.id!, {
+            message: "could not resolve the WebKit execution-context global object",
+          });
+          return null;
+        }
+        p.objectId = objectId;
+      } catch (error) {
+        t.fireErrorToTools(msg.id!, {
+          message: `could not resolve the WebKit execution context: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        });
+        return null;
+      }
+    }
+
+    if ("silent" in p) {
+      p.doNotPauseOnExceptionsAndMuteConsole = !!p.silent;
+    }
+    if ("userGesture" in p) {
+      p.emulateUserGesture = !!p.userGesture;
+    }
+    // These CDP fields are either represented above or have no WIR peer.
+    delete p.executionContextId;
+    delete p.uniqueContextId;
+    delete p.objectGroup;
+    delete p.serializationOptions;
+    delete p.throwOnSideEffect;
+    delete p.silent;
+    delete p.userGesture;
+    return msg;
+  });
   // queryObjects: Safari supports this with the same params
   // ({ prototypeObjectId, objectGroup? }) and same response
   // ({ objects: RemoteObject }). Passthrough.
