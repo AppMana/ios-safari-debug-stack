@@ -37,10 +37,10 @@ jobs:
         run: |
           apt-get update
           apt-get install -y \
-            autoconf automake build-essential debhelper devscripts dpkg-dev \
+            autoconf automake build-essential debhelper devscripts dpkg-dev git \
             esbuild libimobiledevice-dev libplist-dev libssl-dev libtool \
             libusb-1.0-0-dev libusbmuxd-dev lintian nodejs pkg-config python3
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build target package
         env:
           DEBFULLNAME: AppMana Engineering
@@ -69,7 +69,7 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
         with:
           pattern: deb-*

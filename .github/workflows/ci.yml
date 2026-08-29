@@ -12,7 +12,7 @@ jobs:
   source-tests:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.2.23
@@ -37,10 +37,10 @@ jobs:
         run: |
           apt-get update
           apt-get install -y \
-            autoconf automake build-essential debhelper devscripts dpkg-dev \
+            autoconf automake build-essential debhelper devscripts dpkg-dev git \
             esbuild libimobiledevice-dev libplist-dev libssl-dev libtool \
             libusb-1.0-0-dev libusbmuxd-dev lintian nodejs pkg-config python3
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build package
         env:
           DEBFULLNAME: AppMana Engineering
