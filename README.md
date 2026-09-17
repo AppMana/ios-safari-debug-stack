@@ -62,10 +62,41 @@ npx -y chrome-devtools-mcp@1.8.0 \
 ```
 
 Live-device verification covers page discovery, console messages, JavaScript
-evaluation, DOM/resource-tree inspection, and semantic `take_snapshot` output.
-The bridge translates Puppeteer's execution-context form of
-`Runtime.callFunctionOn` and synthesizes Chrome's accessibility tree from
-WebKit DOM data.
+evaluation, navigation, DOM/resource-tree inspection, and semantic
+`take_snapshot` output. The bridge translates Puppeteer's execution-context
+form of `Runtime.callFunctionOn` and synthesizes Chrome's accessibility tree
+from WebKit DOM data.
+
+Puppeteer (`puppeteer-core` 25.11) attaches directly. `puppeteer.connect`,
+`browser.pages()`, `page.goto()` and `page.evaluate()` are verified against a
+physical iPhone on iOS 27:
+
+```js
+import puppeteer from 'puppeteer-core';
+
+const browser = await puppeteer.connect({
+  browserURL: 'http://127.0.0.1:9333',
+  protocolTimeout: 15000,
+});
+const [page] = await browser.pages();
+await page.goto('https://example.com/', { waitUntil: 'domcontentloaded', timeout: 15000 });
+console.log(await page.evaluate(() => document.title));
+// Point-and-click input is experimental; drive interaction from the page.
+await page.evaluate(() => document.querySelector('#start')?.click());
+await browser.disconnect();
+```
+
+`defaultViewport: null` is no longer required, and no `targetFilter` is needed:
+only `page` targets are discovered and auto-attached.
+
+Playwright's `chromium.connectOverCDP('http://127.0.0.1:9333')` connects and
+enumerates the browser context and its pages. Page-level APIs
+(`page.evaluate`, locators, `page.goto`) do not work: Playwright runs them in
+an isolated "utility world" that it asks for with
+`Page.addScriptToEvaluateOnNewDocument({worldName})`, and WebKit cannot create
+one. The bridge does not pass the page's main world off as an isolated world,
+so those calls wait on a world that never appears. Use Puppeteer or
+`chrome-devtools-mcp` for page automation.
 
 Chrome can discover the same endpoint from `chrome://inspect` after adding
 `localhost:9333`. Return to the reliable raw backend with:
@@ -96,8 +127,35 @@ inspector connection per page.
 - IWDP v1.9.2 is patched for GCC 15/glibc 2.43 const correctness and forced
   to bind to IPv4 loopback instead of `INADDR_ANY`.
 - `inspect-webkit` is forced to preserve loopback binding and excludes Safari
-  extension/background targets by default. Those targets caused Puppeteer and
-  Chrome DevTools MCP to auto-attach and fail during `Network.enable`.
+  extension/background targets, service workers and dedicated workers by
+  default. Those targets accept an inspector connection but never answer the
+  page-shaped boot sequence, so Puppeteer and Chrome DevTools MCP auto-attached
+  and failed during `Network.enable`. Pass `--include-extension-targets` to see
+  them. Safari's `WIRTypeKey` is mapped exactly; an unrecognised type is
+  reported as `other`, never as `page`.
+- The bridge treats a Web Inspector tunnel that has stopped carrying traffic as
+  dead. Each device is heartbeated every 1.5s with
+  `_rpc_getConnectedApplications:`; 12s of silence, or a transport close, drops
+  the device, purges its cached page listing, fails every open CDP session with
+  an explicit error, and closes those sockets with a reason. The device is then
+  re-attached by UDID without restarting the service. Before this, a half-open
+  USB tunnel left `/json/list` advertising pages from a Safari process that no
+  longer existed, and every command to them vanished without a reply.
+- Every CDP command carries a 30s watchdog. If Safari does not answer — a WIR
+  session invalidated by a navigation, a page claimed by another debugger, a
+  wedged inner target — the client gets an explicit protocol error naming the
+  app and page. A target never silently drops a command. The ceiling is
+  deliberately generous: a page running heavy work on its main thread cannot
+  execute an evaluate until it yields. Tune it with
+  `INSPECT_WEBKIT_COMMAND_TIMEOUT_MS`.
+- iOS 27 removed `Page.navigate` and `Page.setTouchEmulationEnabled` from
+  WebKit's Page domain. The bridge probes `Page.navigate` once per session and
+  otherwise performs the navigation from inside the page, answering with the
+  frame and loader ids that the resulting `Page.frameNavigated` carries.
+  Touch emulation is acked: the inspected device is a real touch device and
+  the inspector cannot change that.
+- Discovery tolerates a trailing slash (`/json/version/`, `/json/list/`), which
+  is what Playwright requests.
 - The CDP adapter translates Puppeteer's main/utility-world calls and builds a
   resolvable semantic accessibility tree for MCP snapshots, although WebKit
   has no native Chrome Accessibility domain.
@@ -108,6 +166,13 @@ inspector connection per page.
 
 - Safari's protocol does not expose Chrome-equivalent response bodies or page
   screenshots. CDP clients receive explicit errors for unsupported commands.
+- Opening, closing and isolating tabs is not possible over WIR.
+  `Target.createTarget`, `Target.closeTarget`'s browser-context siblings and
+  `Browser.close` return explicit `-32601` errors.
+- Downloads cannot be controlled. `Browser.setDownloadBehavior` is accepted so
+  Playwright's connect sequence completes, but it has no effect.
+- Playwright page automation is unsupported (see above); connection and target
+  enumeration work.
 - MCP element snapshots are supported; Puppeteer-style point-and-click input
   remains experimental because Safari does not provide Chrome's isolated-world
   DOM adoption semantics. Use `evaluate_script` for deterministic interaction.

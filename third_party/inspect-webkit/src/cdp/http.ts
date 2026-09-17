@@ -70,21 +70,38 @@ const HTML_ESCAPES: Record<string, string> = {
   "'": "&#39;",
 };
 
+/**
+ * Normalise a discovery path so a trailing slash is not a 404.
+ *
+ * Playwright's `chromium.connectOverCDP()` fetches `/json/version/` — with
+ * the trailing slash — because it joins the endpoint URL with `json/version`
+ * using WHATWG URL resolution. Chrome's own DevTools HTTP handler treats
+ * `/json/version` and `/json/version/` as the same route, so Playwright
+ * works against Chrome and used to get a bare 404 here ("This does not look
+ * like a DevTools server").
+ */
+export function normalizeDiscoveryPath(pathname: string): string {
+  if (pathname.length <= 1) return pathname;
+  const trimmed = pathname.replace(/\/+$/, "");
+  return trimmed === "" ? "/" : trimmed;
+}
+
 export function createCdpHttpServer(routes: CdpHttpRoutes): http.Server {
   return http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://placeholder");
+    const pathname = normalizeDiscoveryPath(url.pathname);
     const reqHost = req.headers.host ?? "";
 
-    if (url.pathname === "/json/version") {
+    if (pathname === "/json/version") {
       const v =
         typeof routes.version === "function" ? routes.version(reqHost) : routes.version;
       return sendJson(res, v);
     }
-    if (url.pathname === "/json" || url.pathname === "/json/list") {
+    if (pathname === "/json" || pathname === "/json/list") {
       return sendJson(res, routes.listTargets(reqHost));
     }
-    if (url.pathname === "/json/protocol") return sendJson(res, {});
-    if (url.pathname === "/") return sendIndexHtml(res, routes, reqHost);
+    if (pathname === "/json/protocol") return sendJson(res, {});
+    if (pathname === "/") return sendIndexHtml(res, routes, reqHost);
 
     res.writeHead(404, { "content-type": "text/plain" });
     res.end("not found");

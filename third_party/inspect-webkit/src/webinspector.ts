@@ -67,6 +67,18 @@ export class WebInspectorClient {
   private connectionId = uuid();
   private subscribers = new Set<Subscriber>();
   private reading: Promise<void>;
+  // Transport liveness. The USB tunnel under this client can die in two
+  // ways: cleanly (FIN/RST -> the ByteStream closes and the read loop
+  // ends) or silently (the phone reboots Safari, usbmuxd re-enumerates and
+  // nothing is ever delivered again). Callers need to distinguish "no
+  // traffic yet" from "this connection is dead", because a dead client
+  // that keeps accepting send() turns every CDP command into a silent
+  // drop. `closed` covers the clean case; `lastMessageAt` lets the owner
+  // run a liveness probe for the silent one.
+  private closedFlag = false;
+  private closeError: Error | null = null;
+  private closeHandlers = new Set<(err: Error | null) => void>();
+  private lastMessageAtMs = Date.now();
 
   constructor(
     private socket: WISocket,
@@ -76,6 +88,7 @@ export class WebInspectorClient {
       try {
         while (!stream.closed) {
           const msg = await readMessage(stream);
+          this.lastMessageAtMs = Date.now();
           for (const fn of [...this.subscribers]) {
             try {
               fn(msg);
@@ -84,10 +97,50 @@ export class WebInspectorClient {
             }
           }
         }
-      } catch {
-        // stream closed
+        this.markClosed(stream.closeErr ?? null);
+      } catch (e) {
+        this.markClosed(stream.closeErr ?? (e as Error));
       }
     })();
+    socket.on("error", (err: Error) => this.markClosed(err));
+    socket.on("close", () => this.markClosed(this.closeError));
+  }
+
+  private markClosed(err: Error | null) {
+    if (this.closedFlag) return;
+    this.closedFlag = true;
+    this.closeError = err;
+    for (const fn of [...this.closeHandlers]) {
+      try {
+        fn(err);
+      } catch {}
+    }
+    this.closeHandlers.clear();
+  }
+
+  /** True once the underlying tunnel has closed or errored. */
+  get closed(): boolean {
+    return this.closedFlag;
+  }
+
+  /** Error that closed the tunnel, when there was one. */
+  get error(): Error | null {
+    return this.closeError;
+  }
+
+  /** Epoch ms of the last frame decoded from the device. */
+  get lastMessageAt(): number {
+    return this.lastMessageAtMs;
+  }
+
+  /** Run `fn` when the tunnel closes (immediately if it already has). */
+  onClose(fn: (err: Error | null) => void): () => void {
+    if (this.closedFlag) {
+      fn(this.closeError);
+      return () => {};
+    }
+    this.closeHandlers.add(fn);
+    return () => this.closeHandlers.delete(fn);
   }
 
   /** Subscribe to every message the inspector emits. Returns unsubscribe. */
@@ -114,6 +167,13 @@ export class WebInspectorClient {
   }
 
   send(selector: string, argument: Record<string, PlistValue>) {
+    // Never pretend a write succeeded on a dead tunnel: the caller would
+    // wait forever for a reply that can never come.
+    if (this.closedFlag) {
+      throw new Error(
+        `web inspector connection closed${this.closeError ? `: ${this.closeError.message}` : ""}`,
+      );
+    }
     writeMessage(this.socket, {
       __selector: selector,
       __argument: { WIRConnectionIdentifierKey: this.connectionId, ...argument },
@@ -208,6 +268,12 @@ export class WebInspectorClient {
   }
 
   close() {
-    this.socket.end();
+    this.markClosed(this.closeError);
+    try {
+      this.socket.end();
+    } catch {}
+    try {
+      this.socket.destroy();
+    } catch {}
   }
 }

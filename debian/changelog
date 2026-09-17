@@ -1,3 +1,43 @@
+ios-safari-debug-stack (0.2.0) unstable; urgency=medium
+
+  * CDP bridge: detect and recover from a dead Web Inspector tunnel. The USB
+    link to webinspectord can stop carrying traffic without closing, after
+    which /json/list kept advertising pages from a Safari process that no
+    longer existed and every command sent to them was silently dropped. Each
+    source is now heartbeated with _rpc_getConnectedApplications:, declared
+    dead after 12s of silence or on transport close, purged from the listing
+    cache, and re-attached automatically by UDID.
+  * CDP bridge: a target never silently drops a command. Every request now
+    carries a 30s watchdog (INSPECT_WEBKIT_COMMAND_TIMEOUT_MS) that answers
+    with an explicit protocol error naming the app and page, and sessions
+    torn down by the server fail their in-flight commands and close the
+    socket with a reason.
+  * CDP bridge: implement Page.navigate for iOS 27, which removed it from
+    WebKit's Page domain. The bridge probes once per session and otherwise
+    drives the navigation from the page, reporting the frame and loader ids
+    from the resulting Page.frameNavigated. Fixes puppeteer page.goto().
+  * CDP bridge: stop mapping Emulation.setTouchEmulationEnabled onto
+    Page.setTouchEmulationEnabled, removed in iOS 27. The failure made
+    puppeteer.connect() and browser.pages() throw unless the caller passed
+    defaultViewport: null.
+  * CDP bridge: serve /json/version/ and /json/list/ with a trailing slash,
+    so Playwright's chromium.connectOverCDP() discovery succeeds.
+  * CDP bridge: answer Playwright's browser-level handshake —
+    Target.getTargetInfo, Browser.setDownloadBehavior, permission and window
+    stubs — and return explicit -32601 errors for Target.createTarget and the
+    other tab-lifecycle methods WIR cannot provide, instead of dropping the
+    browser socket.
+  * CDP bridge: classify WIRTypeKey exactly. Service-worker and worker
+    targets are no longer reported as type "page", are excluded from
+    /json/list and from browser-level auto-attach, and unknown WIR types are
+    reported as "other" rather than "page".
+  * Tests: add an in-process fake Web Inspector device and end-to-end
+    coverage for Puppeteer connect/pages/evaluate/goto, the Playwright
+    handshake, trailing-slash discovery, wedged-target timeouts, tunnel loss
+    and re-attach.
+
+ -- AppMana Engineering <engineering@appmana.com>  Wed, 16 Sep 2026 18:30:00 -0700
+
 ios-safari-debug-stack (0.1.0) unstable; urgency=medium
 
   * Initial AppMana release for Ubuntu 24.04 and 26.04.

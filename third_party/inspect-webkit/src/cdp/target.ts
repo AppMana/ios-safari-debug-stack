@@ -36,6 +36,40 @@ type Filter = (msg: CdpMessage) => Promise<CdpMessage | null>;
 type Pending = {
   resolve: (v: any) => void;
   reject: (e: any) => void;
+  timer: ReturnType<typeof setTimeout>;
+};
+
+/**
+ * Hard ceiling on how long a single CDP command may go unanswered before
+ * the bridge replies with an explicit protocol error.
+ *
+ * A Safari page can stop answering for reasons the bridge cannot see: the
+ * WIR session was invalidated by a navigation that swapped the web process,
+ * another inspector grabbed the page's single allowed connection, or the
+ * USB tunnel died half-open. Every one of those used to present as "the
+ * command vanished", which is the worst possible failure mode for a client
+ * like Puppeteer or Playwright: it blocks forever, or until the client's
+ * own (much longer) protocol timeout fires with no useful diagnosis.
+ *
+ * A target must never silently drop a command.
+ *
+ * The ceiling is generous on purpose. A page running heavy work on its main
+ * thread (an ML pipeline, a long synchronous task) genuinely cannot execute
+ * an evaluate until it yields, and killing such a command would be wrong.
+ * The watchdog exists to convert "never" into "eventually, with a reason" —
+ * it still fires well inside Puppeteer's own 180s protocol timeout.
+ * Override with INSPECT_WEBKIT_COMMAND_TIMEOUT_MS.
+ */
+export const DEFAULT_COMMAND_TIMEOUT_MS = resolveDefaultCommandTimeout();
+
+function resolveDefaultCommandTimeout(): number {
+  const raw = Number(process.env.INSPECT_WEBKIT_COMMAND_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 30_000;
+}
+
+export type TargetOptions = {
+  /** Override the per-command answer deadline (ms). */
+  commandTimeoutMs?: number;
 };
 
 export class Target {
@@ -59,6 +93,10 @@ export class Target {
   // so we hold them until the first Target.targetCreated arrives.
   private outgoingQueue: string[] = [];
   private sawAnyTargetCreated = false;
+  // Watchdog timers for tool requests that are still awaiting an answer.
+  private toolRequestTimers = new Map<number, ReturnType<typeof setTimeout>>();
+  private commandTimeoutMs: number;
+  private disposedReason: string | null = null;
 
   constructor(
     private ws: WSWebSocket,
@@ -66,7 +104,10 @@ export class Target {
     public readonly appId: string,
     public readonly pageId: number,
     public readonly senderKey: string,
-  ) {}
+    opts: TargetOptions = {},
+  ) {
+    this.commandTimeoutMs = opts.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
+  }
 
   addMessageFilter(method: string, filter: Filter) {
     let list = this.filters.get(method);
@@ -77,10 +118,24 @@ export class Target {
   /** Adapter-initiated call into Safari, awaitable. Uses a negative id. */
   callTarget(method: string, params: any = {}): Promise<any> {
     return new Promise((resolve, reject) => {
+      if (this.disposedReason) {
+        reject(new Error(this.disposedReason));
+        return;
+      }
       const id = -this.adapterRequestId;
       this.adapterRequestId += 2;
-      this.adapterRequestMap.set(id, { resolve, reject });
-      this.sendRaw(JSON.stringify({ id, method, params }));
+      const timer = setTimeout(() => {
+        this.adapterRequestMap.delete(id);
+        reject(new Error(`${method} timed out after ${this.commandTimeoutMs}ms`));
+      }, this.commandTimeoutMs);
+      this.adapterRequestMap.set(id, { resolve, reject, timer });
+      try {
+        this.sendRaw(JSON.stringify({ id, method, params }));
+      } catch (e) {
+        clearTimeout(timer);
+        this.adapterRequestMap.delete(id);
+        reject(e);
+      }
     });
   }
 
@@ -89,10 +144,12 @@ export class Target {
   }
 
   fireResultToTools(id: number, result: any) {
+    this.clearToolRequest(id);
     this.sendToTools(JSON.stringify({ id, result }));
   }
 
   fireErrorToTools(id: number, error: { code?: number; message: string }) {
+    this.clearToolRequest(id);
     this.sendToTools(
       JSON.stringify({ id, error: { code: error.code ?? -32000, message: error.message } }),
     );
@@ -112,7 +169,12 @@ export class Target {
       return;
     }
     if (typeof msg.method === "string" && typeof msg.id === "number") {
+      if (this.disposedReason) {
+        this.fireErrorToTools(msg.id, { code: -32000, message: this.disposedReason });
+        return;
+      }
       this.toolRequestMap.set(msg.id, msg.method);
+      this.armToolTimeout(msg.id, msg.method);
     }
     const eventName = `tools::${msg.method}`;
     const list = this.filters.get(eventName);
@@ -123,7 +185,91 @@ export class Target {
         outgoing = await f(outgoing);
       }
     }
-    if (outgoing) this.sendRaw(JSON.stringify(outgoing));
+    if (!outgoing) return;
+    try {
+      this.sendRaw(JSON.stringify(outgoing));
+    } catch (e) {
+      if (typeof msg.id === "number") {
+        this.fireErrorToTools(msg.id, {
+          code: -32000,
+          message: `${msg.method ?? "command"} could not be delivered: ${(e as Error).message}`,
+        });
+      }
+    }
+  }
+
+  /**
+   * Arm the per-command watchdog. Fires an explicit protocol error back to
+   * the client if Safari never answers, so a wedged or invalidated WIR
+   * session surfaces as a failed command instead of a hang.
+   */
+  private armToolTimeout(id: number, method: string) {
+    const existing = this.toolRequestTimers.get(id);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      this.toolRequestTimers.delete(id);
+      if (!this.toolRequestMap.delete(id)) return;
+      this.sendToTools(
+        JSON.stringify({
+          id,
+          error: {
+            code: -32000,
+            message:
+              `${method} timed out after ${this.commandTimeoutMs}ms: the Safari page ` +
+              `(app ${this.appId}, page ${this.pageId}) did not answer. The inspector ` +
+              `session may have been invalidated by a navigation or claimed by another ` +
+              `debugger; reattach to this target.`,
+          },
+        }),
+      );
+    }, this.commandTimeoutMs);
+    // Node keeps the process alive for pending timers; a per-command
+    // watchdog must not do that.
+    (timer as unknown as { unref?: () => void }).unref?.();
+    this.toolRequestTimers.set(id, timer);
+  }
+
+  /** True while a tool request is still awaiting an answer (its watchdog
+   *  has not fired and nothing has replied yet). Long-running translations
+   *  check this before replying so a timed-out request is not answered
+   *  twice. */
+  hasPendingToolRequest(id: number): boolean {
+    return this.toolRequestMap.has(id);
+  }
+
+  private clearToolRequest(id: number) {
+    const timer = this.toolRequestTimers.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      this.toolRequestTimers.delete(id);
+    }
+    this.toolRequestMap.delete(id);
+  }
+
+  /**
+   * Tear the session down and make sure nothing is left waiting. Called
+   * when the WIR transport behind this target dies, when the owning source
+   * is replaced, or when the DevTools socket goes away.
+   */
+  dispose(reason: string) {
+    if (this.disposedReason) return;
+    this.disposedReason = reason;
+    for (const [id, timer] of this.toolRequestTimers) {
+      clearTimeout(timer);
+      this.sendToTools(JSON.stringify({ id, error: { code: -32000, message: reason } }));
+    }
+    this.toolRequestTimers.clear();
+    this.toolRequestMap.clear();
+    for (const [, pending] of this.adapterRequestMap) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error(reason));
+    }
+    this.adapterRequestMap.clear();
+    this.outgoingQueue = [];
+  }
+
+  get disposed(): boolean {
+    return this.disposedReason !== null;
   }
 
   /** Called by the WebInspector pump when a forward-socket frame arrives
@@ -177,6 +323,7 @@ export class Target {
       const adapterPending = this.adapterRequestMap.get(msg.id);
       if (adapterPending) {
         this.adapterRequestMap.delete(msg.id);
+        clearTimeout(adapterPending.timer);
         if ("error" in msg && msg.error) adapterPending.reject(msg.error);
         else adapterPending.resolve(msg.result ?? {});
         return;
@@ -184,7 +331,7 @@ export class Target {
 
       const method = this.toolRequestMap.get(msg.id);
       if (method) {
-        this.toolRequestMap.delete(msg.id);
+        this.clearToolRequest(msg.id);
         let eventName = `target::${method}`;
         if ("error" in msg && this.filters.has("target::error")) eventName = "target::error";
         const list = this.filters.get(eventName);

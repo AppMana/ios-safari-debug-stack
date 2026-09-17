@@ -6,10 +6,22 @@ export function installEmulationFilters(t: Target) {
   t.addMessageFilter("tools::Emulation.canEmulate", (msg) =>
     swallowWith(t, msg, { result: true }),
   );
-  t.addMessageFilter("tools::Emulation.setTouchEmulationEnabled", (msg) => {
-    msg.method = "Page.setTouchEmulationEnabled";
-    return Promise.resolve(msg);
-  });
+  // Emulation.setTouchEmulationEnabled. WebKit removed
+  // Page.setTouchEmulationEnabled; verified live against iOS 27.0
+  // ("'Page.setTouchEmulationEnabled' was not found"), and there is no
+  // replacement in the Page domain's overrideSetting enum. Forwarding it
+  // produced a protocol error that Puppeteer treats as fatal: its
+  // EmulationManager applies the default viewport on every new page, so
+  // `browser.pages()` / `puppeteer.connect()` failed outright unless the
+  // caller passed `defaultViewport: null`.
+  //
+  // The inspected device is a physical iPhone or iPad: touch input is
+  // always present and cannot be turned off from the inspector. Ack the
+  // command so viewport emulation completes; the touch capability of the
+  // real device is unchanged either way.
+  t.addMessageFilter("tools::Emulation.setTouchEmulationEnabled", (msg) =>
+    swallowWith(t, msg, {}),
+  );
   t.addMessageFilter("tools::Emulation.setScriptExecutionDisabled", (msg) => {
     msg.method = "Page.setScriptExecutionDisabled";
     return Promise.resolve(msg);

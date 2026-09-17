@@ -50,9 +50,9 @@ export function installPageFilters(t: Target, ctx: DomainCtx) {
   // but iOS 26 Safari handles it cleanly.) We forward instead of swallow so
   // Safari can release any resources it holds.
 
-  // Page.navigate / Page.reload — pure pass-through. Safari's params shape
-  // matches CDP for both (url + transitionType ignored vs. ignoreCache+
-  // scriptToEvaluateOnLoad ignored). No filter needed.
+  // Page.reload — pure pass-through; Safari's params shape matches CDP
+  // (ignoreCache + scriptToEvaluateOnLoad are ignored). Page.navigate is
+  // handled at the bottom of this file: iOS 27 removed it.
 
   // Schema.getDomains: leave passthrough. Stubbing it caused DevTools to
   // believe we fully implement Network/etc., then call methods we don't
@@ -155,6 +155,7 @@ export function installPageFilters(t: Target, ctx: DomainCtx) {
     if (f) {
       lastFrameId = f.id ?? lastFrameId;
       lastLoaderId = f.loaderId ?? lastLoaderId;
+      for (const waiter of [...frameNavigatedWaiters]) waiter(f);
       // Puppeteer's FrameManager only honors lifecycle events after it has
       // seen Page.frameStartedLoading for the frame (sets
       // frame._hasStartedLoading). WebKit doesn't emit it; synthesize so
@@ -213,6 +214,101 @@ export function installPageFilters(t: Target, ctx: DomainCtx) {
     // Puppeteer uses frameStoppedLoading to clear in-flight nav state.
     t.fireEventToTools("Page.frameStoppedLoading", { frameId: lastFrameId });
     return Promise.resolve(msg);
+  });
+
+  // ---- Page.navigate ------------------------------------------------------
+  //
+  // iOS 27 removed Page.navigate from WebKit's Page domain (verified live:
+  // "'Page.navigate' was not found"; Page.reload is still there). Puppeteer's
+  // page.goto() sends it and treats the protocol error as fatal, so every
+  // navigation against a modern phone failed.
+  //
+  // Older iOS still has it, so try the real command once per session and
+  // remember the answer. When it is missing, perform the navigation from
+  // inside the page — the only mechanism WebKit still offers — and report
+  // the frame/loader ids that the resulting Page.frameNavigated actually
+  // carries, rather than inventing them.
+  let pageNavigateSupported: boolean | null = null;
+  const frameNavigatedWaiters = new Set<(frame: any) => void>();
+
+  function nextFrameNavigated(timeoutMs: number): Promise<any | null> {
+    return new Promise((resolve) => {
+      const done = (frame: any | null) => {
+        frameNavigatedWaiters.delete(done as (f: any) => void);
+        clearTimeout(timer);
+        resolve(frame);
+      };
+      const timer = setTimeout(() => done(null), timeoutMs);
+      frameNavigatedWaiters.add(done as (f: any) => void);
+    });
+  }
+
+  function isMethodNotFound(e: any): boolean {
+    const code = e?.code ?? e?.data?.[0]?.code;
+    const message = String(e?.message ?? "");
+    return code === -32601 || /was not found/i.test(message);
+  }
+
+  t.addMessageFilter("tools::Page.navigate", async (msg) => {
+    const url = msg.params?.url;
+    if (typeof msg.id !== "number" || typeof url !== "string") return msg;
+
+    if (pageNavigateSupported !== false) {
+      try {
+        const r = await t.callTarget("Page.navigate", { url });
+        pageNavigateSupported = true;
+        t.fireResultToTools(msg.id, {
+          frameId: r?.frameId ?? lastFrameId,
+          loaderId: r?.loaderId ?? lastLoaderId,
+        });
+        return null;
+      } catch (e) {
+        if (!isMethodNotFound(e)) {
+          t.fireErrorToTools(msg.id, {
+            message: `Page.navigate failed: ${(e as any)?.message ?? String(e)}`,
+          });
+          return null;
+        }
+        pageNavigateSupported = false;
+      }
+    }
+
+    // Stay under the per-command watchdog so the request is never answered twice.
+    const navigated = nextFrameNavigated(8_000);
+    try {
+      const r = await t.callTarget("Runtime.evaluate", {
+        expression: `location.href = ${JSON.stringify(url)}`,
+      });
+      if (r?.wasThrown) {
+        t.fireErrorToTools(msg.id, {
+          message: `navigation to ${url} was rejected by the page: ${
+            r?.result?.description ?? r?.result?.value ?? "exception"
+          }`,
+        });
+        return null;
+      }
+    } catch (e) {
+      t.fireErrorToTools(msg.id, {
+        message: `navigation to ${url} could not be started: ${(e as any)?.message ?? String(e)}`,
+      });
+      return null;
+    }
+
+    const frame = await navigated;
+    if (!t.hasPendingToolRequest(msg.id)) return null;
+    if (!frame) {
+      t.fireErrorToTools(msg.id, {
+        message:
+          `navigation to ${url} was started but Safari never reported ` +
+          `Page.frameNavigated; the page may have blocked or deferred it.`,
+      });
+      return null;
+    }
+    t.fireResultToTools(msg.id, {
+      frameId: frame.id ?? lastFrameId,
+      loaderId: frame.loaderId ?? lastLoaderId,
+    });
+    return null;
   });
 }
 

@@ -28,7 +28,7 @@ test("inner response cannot be consumed as its wrapper acknowledgement", async (
   const inner = JSON.parse(envelope.params.message);
 
   expect(envelope.id).not.toBe(inner.id);
-  expect(envelope.id % 2).toBe(0);
+  expect(Math.abs(envelope.id) % 2).toBe(0);
   expect(inner.id % 2).not.toBe(0);
 
   // This is the race seen on a real iPhone: the fast evaluate result arrives

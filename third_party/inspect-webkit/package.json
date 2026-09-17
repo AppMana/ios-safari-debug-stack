@@ -1,6 +1,6 @@
 {
   "name": "inspect-webkit",
-  "version": "0.0.5",
+  "version": "0.0.5+appmana2",
   "description": "Headlessly list debuggable Safari / WKWebView targets across iOS devices and Simulators, and bridge them to Chrome DevTools Protocol. Pure Bun/TypeScript.",
   "type": "module",
   "main": "dist/index.js",
@@ -58,6 +58,7 @@
     "@types/node": "^22.0.0",
     "@types/ws": "^8.5.13",
     "commander": "^14.0.3",
+    "puppeteer-core": "25.11.0",
     "typescript": "^5",
     "ws": "^8.18.0"
   },

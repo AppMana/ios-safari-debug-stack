@@ -15,6 +15,10 @@
 
 import type { WebSocket as WSWebSocket } from "ws";
 
+/** Synthetic browser target id — Playwright asks for it via
+ *  Target.getTargetInfo with no targetId during connectOverCDP(). */
+const BROWSER_TARGET_ID = "safari-browser";
+
 export type BrowserEntry = {
   targetId: string;
   type: string; // CDP type ("page", "worker", ...)
@@ -49,6 +53,14 @@ export function attachBrowserWs(ws: WSWebSocket, opts: BrowserEndpointOptions): 
   // with that sessionId in flatten mode. We allocate one per connection and
   // recurse browser-level routing through it.
   let browserSessionId: string | null = null;
+  const browserTargetInfo = {
+    targetId: BROWSER_TARGET_ID,
+    type: "browser",
+    title: "Safari",
+    url: "",
+    attached: true,
+    canAccessOpener: false,
+  };
 
   function send(obj: any): void {
     if (ws.readyState !== 1) return;
@@ -74,6 +86,18 @@ export function attachBrowserWs(ws: WSWebSocket, opts: BrowserEndpointOptions): 
       canAccessOpener: false,
       browserContextId: "default",
     };
+  }
+
+  /**
+   * Only page targets are auto-attached. Safari's service-worker and
+   * dedicated-worker targets accept a WIR inspector connection but do not
+   * implement the page-shaped domains Puppeteer and Playwright drive right
+   * after attach (Page.enable, Network.enable, Emulation.*). Auto-attaching
+   * them makes those clients issue commands the worker never answers, and
+   * it burns the single inspector slot WebKit grants per target.
+   */
+  function isAutoAttachable(e: BrowserEntry): boolean {
+    return e.type === "page";
   }
 
   function isAttached(targetId: string): boolean {
@@ -133,7 +157,7 @@ export function attachBrowserWs(ws: WSWebSocket, opts: BrowserEndpointOptions): 
             targetInfo: targetInfo(e, isAttached(e.targetId)),
           });
         }
-        if (autoAttach && !isAttached(e.targetId)) {
+        if (autoAttach && isAutoAttachable(e) && !isAttached(e.targetId)) {
           attachToTarget(e.targetId, waitForDebuggerOnStart);
         }
       } else if (prev.title !== e.title || prev.url !== e.url) {
@@ -218,7 +242,9 @@ export function attachBrowserWs(ws: WSWebSocket, opts: BrowserEndpointOptions): 
         // (chrome-devtools-mcp) believe there are no pages.
         if (autoAttach) {
           for (const e of opts.listEntries()) {
-            if (!isAttached(e.targetId)) attachToTarget(e.targetId, waitForDebuggerOnStart);
+            if (isAutoAttachable(e) && !isAttached(e.targetId)) {
+              attachToTarget(e.targetId, waitForDebuggerOnStart);
+            }
           }
         }
         if (typeof id === "number") reply(envelopeSessionId, { id, result: {} });
@@ -277,6 +303,71 @@ export function attachBrowserWs(ws: WSWebSocket, opts: BrowserEndpointOptions): 
           reply(envelopeSessionId, { id, result: { browserContextIds: ["default"] } });
         return;
       }
+      // Playwright's connectOverCDP() calls Target.getTargetInfo with no
+      // targetId to identify the browser target itself, then again per
+      // attached session. Without an answer its handshake stalls.
+      case "Target.getTargetInfo": {
+        if (typeof id !== "number") return;
+        const wanted: string | undefined = params.targetId;
+        if (!wanted || wanted === BROWSER_TARGET_ID) {
+          return reply(envelopeSessionId, { id, result: { targetInfo: browserTargetInfo } });
+        }
+        const entry = opts.listEntries().find((e) => e.targetId === wanted);
+        if (!entry) {
+          return reply(envelopeSessionId, {
+            id,
+            error: { code: -32000, message: `No target with given id found: ${wanted}` },
+          });
+        }
+        return reply(envelopeSessionId, {
+          id,
+          result: { targetInfo: targetInfo(entry, isAttached(entry.targetId)) },
+        });
+      }
+      // Playwright configures a download directory during connectOverCDP()
+      // and treats a protocol error as fatal. Safari's remote inspector has
+      // no download control at all, so the configuration is accepted and
+      // has no effect; downloads still land wherever the phone puts them.
+      // See "Known limitations" in the stack README.
+      case "Browser.setDownloadBehavior":
+      case "Browser.setPermission":
+      case "Browser.grantPermissions":
+      case "Browser.resetPermissions":
+        if (typeof id === "number") reply(envelopeSessionId, { id, result: {} });
+        return;
+      case "Browser.getWindowForTarget": {
+        if (typeof id === "number")
+          reply(envelopeSessionId, {
+            id,
+            result: {
+              windowId: 1,
+              bounds: { left: 0, top: 0, width: 0, height: 0, windowState: "normal" },
+            },
+          });
+        return;
+      }
+      // Creating and closing tabs is not something WIR exposes. Answer with
+      // an explicit protocol error rather than a fabricated success, so a
+      // client that needs a new tab fails loudly instead of waiting on a
+      // target that will never appear.
+      case "Target.createTarget":
+      case "Target.createBrowserContext":
+      case "Target.disposeBrowserContext":
+      case "Browser.close":
+      case "Browser.crash":
+        if (typeof id === "number") {
+          reply(envelopeSessionId, {
+            id,
+            error: {
+              code: -32601,
+              message:
+                `'${method}' is not supported by Safari's remote inspector: the bridge ` +
+                `can attach to pages the device already has open, but cannot open, close ` +
+                `or isolate them.`,
+            },
+          });
+        }
+        return;
     }
 
     if (typeof id === "number") {
