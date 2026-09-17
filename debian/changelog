@@ -1,3 +1,16 @@
+ios-safari-debug-stack (0.2.1) unstable; urgency=medium
+
+  * CDP bridge: recover when Puppeteer hands back an execution-context id
+    WebKit has already destroyed. Runtime.callFunctionOn resolves its
+    receiver by evaluating `this` in the requested context; WebKit answers
+    "missing injected script for given execution context id" once the realm
+    is gone, which broke page.evaluate() after a page created or replaced a
+    realm (observed live on a page starting an AudioWorklet). The receiver
+    is now re-resolved against the page's current main world, and the error
+    text reports WebKit's own message instead of "[object Object]".
+
+ -- AppMana Engineering <engineering@appmana.com>  Wed, 16 Sep 2026 19:20:00 -0700
+
 ios-safari-debug-stack (0.2.0) unstable; urgency=medium
 
   * CDP bridge: detect and recover from a dead Web Inspector tunnel. The USB

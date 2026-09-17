@@ -220,28 +220,44 @@ export function installRuntimeFilters(t: Target, ctx: DomainCtx) {
           // Opaque object ids are valid; retain the requested context.
         }
       }
-      try {
+      // Resolve the receiver. A context id Puppeteer captured earlier can
+      // already be gone — WebKit destroys and recreates injected scripts
+      // across navigations and when the page spins up new realms — and
+      // WebKit then answers "missing injected script for given execution
+      // context id". Retry once against the page's current main world:
+      // the requested world no longer exists, and this bridge maps
+      // Puppeteer's utility world onto the main world anyway (see
+      // Page.createIsolatedWorld in domains/page.ts), so there is exactly
+      // one live world to fall back to.
+      const resolveGlobal = async (useContextId: boolean) => {
         const global = await t.callTarget("Runtime.evaluate", {
           expression: "this",
-          ...(contextId ? { contextId } : {}),
+          ...(useContextId && contextId ? { contextId } : {}),
           ...(p.objectGroup ? { objectGroup: p.objectGroup } : {}),
         });
         const objectId = global?.result?.objectId;
-        if (typeof objectId !== "string") {
-          t.fireErrorToTools(msg.id!, {
-            message: "could not resolve the WebKit execution-context global object",
-          });
-          return null;
+        return typeof objectId === "string" ? objectId : null;
+      };
+      let objectId: string | null = null;
+      let lastError: unknown = null;
+      for (const useContextId of contextId ? [true, false] : [false]) {
+        try {
+          objectId = await resolveGlobal(useContextId);
+          if (objectId) break;
+        } catch (error) {
+          lastError = error;
         }
-        p.objectId = objectId;
-      } catch (error) {
+      }
+      if (!objectId) {
         t.fireErrorToTools(msg.id!, {
-          message: `could not resolve the WebKit execution context: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
+          message:
+            `could not resolve the WebKit execution context` +
+            (contextId ? ` (requested context ${contextId})` : "") +
+            (lastError ? `: ${describeWirError(lastError)}` : ""),
         });
         return null;
       }
+      p.objectId = objectId;
     }
 
     if ("silent" in p) {
@@ -274,4 +290,20 @@ export function installRuntimeFilters(t: Target, ctx: DomainCtx) {
     t.fireEventToTools("Runtime.executionContextsCleared", {});
     return Promise.resolve(null);
   });
+}
+
+/** WIR errors arrive as plain objects, not Error instances; stringifying one
+ *  with String() yields "[object Object]", which tells nobody anything. */
+function describeWirError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object") {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string") return message;
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return "unknown error";
+    }
+  }
+  return String(error);
 }
