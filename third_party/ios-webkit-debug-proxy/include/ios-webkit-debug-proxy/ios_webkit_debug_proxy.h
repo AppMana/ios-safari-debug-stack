@@ -27,6 +27,7 @@ struct iwdp_struct;
 typedef struct iwdp_struct *iwdp_t;
 iwdp_t iwdp_new(const char* frontend, const char* sim_wi_socket_addr);
 void iwdp_free(iwdp_t self);
+void iwdp_retry_attach(iwdp_t self, const char *device_id);
 
 struct iwdp_struct {
 

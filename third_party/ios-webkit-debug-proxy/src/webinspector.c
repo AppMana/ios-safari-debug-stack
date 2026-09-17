@@ -66,7 +66,7 @@ static const char *lockdownd_err_to_string(int ldret) {
     case LOCKDOWN_E_INVALID_HOST_ID:
       return "Device is not paired with this host. Re-plug device and try again.";
     default:
-      return "Could not connect to lockdownd, error code: %d.";
+      return "Could not connect to lockdownd.";
   }
 }
 
@@ -93,7 +93,7 @@ int wi_connect(const char *device_id, char **to_device_id,
   lockdownd_error_t ldret;
   if (LOCKDOWN_E_SUCCESS != (ldret = lockdownd_client_new_with_handshake(
         phone, &client, "ios_webkit_debug_proxy"))) {
-    fprintf(stderr, "%s\n", lockdownd_err_to_string(ldret));
+    fprintf(stderr, "%s (lockdown error %d)\n", lockdownd_err_to_string(ldret), ldret);
     goto leave_cleanup;
   }
 

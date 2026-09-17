@@ -138,7 +138,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         paired = run("idevicepair", "-u", udid, "validate")
         ok = paired.returncode == 0 and "SUCCESS" in (paired.stdout + paired.stderr)
         pairing_ok = pairing_ok and ok
-        pair_details.append(f"{masked_udid(udid)}={'trusted' if ok else 'not trusted'}")
+        # A transport/SSL failure does not establish that trust was revoked.
+        detail = 'trusted' if ok else 'validation failed (device may be disconnected or locked)'
+        pair_details.append(f"{masked_udid(udid)}={detail}")
     check(results, "device_pairing", pairing_ok, ", ".join(pair_details) or "no device")
 
     protocol_ready = False
@@ -171,6 +173,29 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     if selected == "stopped" or not active("usbmuxd.service"):
         return 3
     return 0 if protocol_ready and pairing_ok and supported_os else 2
+
+
+def wip_pages(udid: str) -> list[dict[str, Any]]:
+    """Resolve the current device port by stable UDID on every call."""
+    devices = fetch_json("http://127.0.0.1:9221/json")
+    device = next((d for d in devices if d.get("deviceId") == udid), None)
+    if device is None:
+        raise ValueError(f"device {masked_udid(udid)} is not exposed by the WIP backend")
+    endpoint = str(device.get("url", ""))
+    # Discovery belongs to the local proxy; never follow arbitrary hosts.
+    import re
+    if not re.fullmatch(r"(?:localhost|127\.0\.0\.1):[0-9]+", endpoint):
+        raise ValueError("invalid local device endpoint")
+    return fetch_json(f"http://{endpoint}/json")
+
+
+def cmd_pages(args: argparse.Namespace) -> int:
+    try:
+        print(json.dumps(wip_pages(args.udid), indent=2))
+        return 0
+    except (OSError, ValueError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
 
 
 def require_root() -> None:
@@ -255,6 +280,10 @@ def cmd_ui(_: argparse.Namespace) -> int:
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="ios-safari-debug")
     commands = root.add_subparsers(dest="command", required=True)
+
+    pages = commands.add_parser("pages", help="list WIP pages for a stable device UDID")
+    pages.add_argument("--udid", required=True)
+    pages.set_defaults(func=cmd_pages)
 
     status = commands.add_parser("status", help="show services and endpoints")
     status.set_defaults(func=cmd_status)

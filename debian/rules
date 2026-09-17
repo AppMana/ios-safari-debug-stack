@@ -29,6 +29,8 @@ override_dh_auto_build:
 
 override_dh_auto_test:
 	python3 -m unittest discover -s tests -v
+	$(CC) -I$(BUILD_DIR)/iwdp/include/ios-webkit-debug-proxy tests/test_iwdp_reconnect.c -L$(BUILD_DIR)/iwdp/src/.libs -lios_webkit_debug_proxy -o $(BUILD_DIR)/test_iwdp_reconnect
+	LD_LIBRARY_PATH=$(BUILD_DIR)/iwdp/src/.libs $(BUILD_DIR)/test_iwdp_reconnect
 	$(BUILD_DIR)/iwdp/src/ios_webkit_debug_proxy --version
 	/usr/bin/node $(BUILD_DIR)/ios-safari-cdp-bridge --help >/dev/null
 	timeout 2s /usr/bin/node $(BUILD_DIR)/ios-safari-cdp-bridge --host 127.0.0.1 --port 19333 >/dev/null 2>&1; status=$$?; test $$status -eq 124
@@ -44,6 +46,8 @@ override_dh_auto_install:
 	install -D -m 0644 systemd/ios-safari-debug-cdp.service $(PKG_DIR)/usr/lib/systemd/system/ios-safari-debug-cdp.service
 	install -D -m 0644 systemd/ios-safari-debug-ui.service $(PKG_DIR)/usr/lib/systemd/system/ios-safari-debug-ui.service
 	install -D -m 0644 systemd/ios-safari-debug-stack.sysusers $(PKG_DIR)/usr/lib/sysusers.d/ios-safari-debug-stack.conf
+
+	install -D -m 0644 systemd/10-preserve-pairing.conf $(PKG_DIR)/usr/lib/systemd/system/usbmuxd.service.d/10-ios-safari-preserve-pairing.conf
 
 override_dh_installsystemd:
 	dh_installsystemd --no-enable --no-start

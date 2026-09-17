@@ -367,6 +367,8 @@ iwdp_status iwdp_start(iwdp_t self) {
     return self->on_error(self, "Unable to start device_listener");
   }
 
+  my->idl = idl;
+
   // TODO add iOS simulator listener
   // for now we'll fake a callback
   dl->on_attach(dl, "SIMULATOR", -1);
@@ -456,6 +458,16 @@ dl_status iwdp_on_attach(dl_t dl, const char *device_id, int device_num) {
 
   iport->is_sticky = true;
   return DL_SUCCESS;
+}
+
+// Reconcile a device still advertised by usbmuxd after a transient attach
+// failure. Never tear down an existing inspector or another device's clients.
+void iwdp_retry_attach(iwdp_t self, const char *device_id) {
+  iwdp_private_t my = self->private_state;
+  if (!my->idl || !device_id) return;
+  iwdp_iport_t iport = (iwdp_iport_t)ht_get_value(my->device_id_to_iport, device_id);
+  if (iport && iport->iwi) return;
+  iwdp_on_attach(my->idl->dl, device_id, -1);
 }
 
 dl_status iwdp_on_detach(dl_t dl, const char *device_id, int device_num) {
@@ -637,6 +649,7 @@ iwdp_status iwdp_ifs_close(iwdp_t self, iwdp_ifs_t ifs) {
 }
 
 iwdp_status iwdp_idl_close(iwdp_t self, iwdp_idl_t idl) {
+  self->private_state->idl = NULL;
   // TODO rm_fd all device_id_to_iport s_fds?!
   return IWDP_SUCCESS;
 }

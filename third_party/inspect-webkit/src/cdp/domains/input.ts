@@ -50,7 +50,7 @@ export function installInputFilters(t: Target) {
       t.fireResultToTools(msg.id!, {});
       return null;
     }
-    const sequence = dom === "click" ? ["mousedown", "click", "mouseup"] : [dom];
+    const sequence = dom === "click" ? ["mouseup", "click"] : [dom];
     try {
       for (const evType of sequence) {
         const payload = {
@@ -60,8 +60,11 @@ export function installInputFilters(t: Target) {
           button: params.button ?? "none",
           type: evType,
         };
-        const expr = `(${SIMULATE_FN}, __sd_simulate(${JSON.stringify(payload)}))`;
-        await t.callTarget("Runtime.evaluate", { expression: expr });
+        const expr = `(${SIMULATE_FN})(${JSON.stringify(payload)})`;
+        const evaluated = await t.callTarget("Runtime.evaluate", { expression: expr });
+        if (evaluated?.exceptionDetails) {
+          throw new Error(evaluated.exceptionDetails.text ?? "synthetic input evaluation failed");
+        }
       }
       t.fireResultToTools(msg.id!, {});
     } catch (e: any) {

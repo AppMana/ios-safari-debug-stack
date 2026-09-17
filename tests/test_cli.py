@@ -17,6 +17,24 @@ SPEC.loader.exec_module(cli)
 
 
 class CliTests(unittest.TestCase):
+    @patch.object(cli, "fetch_json")
+    def test_pages_resolves_device_after_ports_swap(self, fetch: MagicMock) -> None:
+        fetch.side_effect = [
+            [{"deviceId": "phone", "url": "localhost:9222"}, {"deviceId": "ipad", "url": "localhost:9223"}],
+            [{"id": "ipad-page"}],
+            [{"deviceId": "ipad", "url": "localhost:9222"}, {"deviceId": "phone", "url": "localhost:9223"}],
+            [{"id": "ipad-new-page"}],
+        ]
+        self.assertEqual(cli.wip_pages("ipad"), [{"id": "ipad-page"}])
+        self.assertEqual(cli.wip_pages("ipad"), [{"id": "ipad-new-page"}])
+        self.assertEqual(fetch.call_args_list[1].args, ("http://localhost:9223/json",))
+        self.assertEqual(fetch.call_args_list[3].args, ("http://localhost:9222/json",))
+
+    @patch.object(cli, "fetch_json", return_value=[{"deviceId": "phone", "url": "localhost:9222"}])
+    def test_missing_device_never_selects_another(self, _: MagicMock) -> None:
+        with self.assertRaises(ValueError):
+            cli.wip_pages("ipad")
+
     def test_masks_device_identifier(self) -> None:
         self.assertEqual(cli.masked_udid("00008120-001234560123401E"), "…23401E")
 

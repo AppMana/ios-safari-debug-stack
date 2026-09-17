@@ -17,6 +17,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <libimobiledevice/libimobiledevice.h>
 
 #ifndef HAVE_REGEX_H
 #include <pcre.h>
@@ -95,10 +97,22 @@ int main(int argc, char** argv) {
   }
 
   sm_t sm = self->sm;
+  time_t next_retry = time(NULL) + 5;
   while (!quit_flag) {
     if (sm->select(sm, 2) < 0) {
       ret = -1;
       break;
+    }
+    if (time(NULL) >= next_retry) {
+      char **devices = NULL;
+      int count = 0;
+      if (idevice_get_device_list(&devices, &count) == IDEVICE_E_SUCCESS) {
+        for (int i = 0; i < count && !quit_flag; i++) {
+          iwdp_retry_attach(iwdp, devices[i]);
+        }
+        idevice_device_list_free(devices);
+      }
+      next_retry = time(NULL) + 5;
     }
   }
   sm->cleanup(sm);

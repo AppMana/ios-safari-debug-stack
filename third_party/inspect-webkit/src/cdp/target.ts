@@ -42,7 +42,11 @@ export class Target {
   private filters = new Map<string, Filter[]>();
   private toolRequestMap = new Map<number, string>();
   private adapterRequestMap = new Map<number, Pending>();
-  private requestId = 0;
+  // Adapter calls and Target.sendMessageToTarget envelopes need disjoint ids.
+  // WebKit may deliver the inner response before the outer envelope ack; if
+  // both share an id, the inner response is mistaken for the ack and dropped.
+  private adapterRequestId = 1;
+  private wrapperRequestId = 2;
   // Target-based mode (modern Safari, iOS 13+): each page exposes inner
   // CDP targets. We auto-detect on the first Target.targetCreated of type
   // "page" and from then on wrap outgoing non-Target.* messages in
@@ -73,7 +77,8 @@ export class Target {
   /** Adapter-initiated call into Safari, awaitable. Uses a negative id. */
   callTarget(method: string, params: any = {}): Promise<any> {
     return new Promise((resolve, reject) => {
-      const id = --this.requestId;
+      const id = -this.adapterRequestId;
+      this.adapterRequestId += 2;
       this.adapterRequestMap.set(id, { resolve, reject });
       this.sendRaw(JSON.stringify({ id, method, params }));
     });
@@ -220,9 +225,11 @@ export class Target {
 
     // If target-based mode is in effect, wrap.
     if (this.innerTargetId && m && !isTargetDomain) {
-      if (typeof m.id === "number") this.wrappedAckIds.add(m.id);
+      const wrapperId = -this.wrapperRequestId;
+      this.wrapperRequestId += 2;
+      this.wrappedAckIds.add(wrapperId);
       const wrapped = {
-        id: m.id,
+        id: wrapperId,
         method: "Target.sendMessageToTarget",
         params: { id: m.id, message: rawMessage, targetId: this.innerTargetId },
       };
