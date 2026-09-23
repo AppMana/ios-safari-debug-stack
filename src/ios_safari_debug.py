@@ -191,7 +191,20 @@ def wip_pages(udid: str) -> list[dict[str, Any]]:
 
 def cmd_pages(args: argparse.Namespace) -> int:
     try:
-        print(json.dumps(wip_pages(args.udid), indent=2))
+        selected = backend()
+        if selected == "wip":
+            pages = wip_pages(args.udid)
+        elif selected == "cdp":
+            # Target IDs are device:<UDID>:<application>:<page>. Include the
+            # delimiter so prefix-overlapping devices cannot match each other.
+            prefix = f"device:{args.udid}:"
+            pages = [page for page in fetch_json("http://127.0.0.1:9333/json/list")
+                     if str(page.get("id", "")).startswith(prefix)]
+            if not pages:
+                raise ValueError(f"device {masked_udid(args.udid)} has no inspectable CDP pages")
+        else:
+            raise ValueError("no debug backend is active")
+        print(json.dumps(pages, indent=2))
         return 0
     except (OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
@@ -281,7 +294,7 @@ def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="ios-safari-debug")
     commands = root.add_subparsers(dest="command", required=True)
 
-    pages = commands.add_parser("pages", help="list WIP pages for a stable device UDID")
+    pages = commands.add_parser("pages", help="list pages from the active backend for a stable device UDID")
     pages.add_argument("--udid", required=True)
     pages.set_defaults(func=cmd_pages)
 

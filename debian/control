@@ -30,10 +30,10 @@ Depends:
  nodejs (>= 18.19),
  python3,
  systemd-sysusers,
- usbmuxd,
+ usbmuxd (>= 1.1.1-5~exp3ubuntu2.1+appmana2),
 Recommends: xdg-utils
 Description: USB debugging stack for Mobile Safari on Ubuntu
  Installs a local-only WebKit Inspector proxy for iwdp-mcp, an optional
  WebKit-to-Chrome DevTools Protocol bridge, diagnostics, systemd services,
- and a bundled browser-based Web Inspector. It uses Ubuntu's usbmuxd and
- libimobiledevice packages to communicate with trusted iOS and iPadOS devices.
+ and a bundled browser-based Web Inspector. It requires AppMana's patched
+ usbmuxd and uses Ubuntu's libimobiledevice libraries for trusted iOS devices.

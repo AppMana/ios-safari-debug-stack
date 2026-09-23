@@ -1,3 +1,10 @@
+ios-safari-debug-stack (0.2.2) noble; urgency=medium
+
+  * Bound USB handshake waits and add a reconnecting evaluation service.
+  * Require the patched usbmuxd package published in AppMana APT.
+
+ -- AppMana Engineering <engineering@appmana.com>  Wed, 23 Sep 2026 13:00:00 -0700
+
 ios-safari-debug-stack (0.2.1) unstable; urgency=medium
 
   * CDP bridge: recover when Puppeteer hands back an execution-context id

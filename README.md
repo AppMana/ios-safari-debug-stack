@@ -1,8 +1,9 @@
 # iOS Safari Debug Stack for Ubuntu
 
-One `.deb` installs and prepares a local-only Mobile Safari debugging stack for
-Ubuntu 24.04 and 26.04. It uses Ubuntu's `usbmuxd`, `libimobiledevice`,
-`libplist`, and `libusbmuxd` packages rather than replacing them.
+Installs a local-only Mobile Safari debugging stack. AppMana APT currently
+publishes the stack and patched `usbmuxd` for Ubuntu 24.04 (Noble), amd64.
+The patched daemon upgrades Ubuntu's `usbmuxd` in place; `libimobiledevice`,
+`libplist`, and `libusbmuxd` remain the distribution libraries.
 
 The default backend is the mature raw WebKit Inspector path used by
 [`iwdp-mcp`](https://github.com/nnemirovsky/iwdp-mcp). A selectable CDP bridge
@@ -13,12 +14,35 @@ for humans at `http://127.0.0.1:8080/`.
 
 ## Install
 
-Download the `.deb` matching the Ubuntu release and CPU architecture, then use
-APT so distro dependencies are resolved:
+Add the signed AppMana repository and install through APT:
 
 ```sh
-sudo apt install ./ios-safari-debug-stack_*.deb
+curl -fsSL https://appmana.github.io/apt/appmana-archive-keyring.gpg \
+  | sudo gpg --dearmor --yes -o /usr/share/keyrings/appmana-archive-keyring.gpg
+echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/appmana-archive-keyring.gpg] https://appmana.github.io/apt noble main' \
+  | sudo tee /etc/apt/sources.list.d/appmana.list
+sudo apt update
+sudo apt install ios-safari-debug-stack
 ```
+
+This also installs `usbmuxd >= 1.1.1-5~exp3ubuntu2.1+appmana2`. The AppMana
+build keeps the **same package name**, executable paths, udev rules and systemd
+service as Ubuntu's daemon. Its higher version makes this a normal in-place
+upgrade: there is one daemon, not two competing installations. A `Replaces`
+field is unnecessary for an upgrade of the same package. No forced overwrite,
+manual removal, package hold, or deletion of pairing records is needed.
+
+The [daemon fork](https://github.com/AppMana/forks-usbmuxd-ios/tree/appmana/ubuntu-noble)
+backports upstream's reentrant-client-close fix and restarts the service after
+abnormal process termination. It retains Ubuntu's security patches. Upgrading
+the daemon briefly disconnects inspector sessions; the bridge reconnects.
+Verify the selected and installed versions with `apt-cache policy usbmuxd` and
+`dpkg-query -W usbmuxd ios-safari-debug-stack`.
+
+For offline installation, download **both** matching `.deb` files from the
+two repositories' releases and run `sudo apt install ./usbmuxd_*.deb
+./ios-safari-debug-stack_*.deb`. The daemon is a required dependency, not an
+optional follow-up installation.
 
 On the iPhone or iPad:
 
@@ -114,12 +138,13 @@ inspector connection per page.
 | Interface | Purpose |
 | --- | --- |
 | `ios-safari-debug doctor [--json]` | USB, pairing, service, and page checks |
-| `ios-safari-debug pages --udid <UDID>` | Resolve current WIP pages for one device |
+| `ios-safari-debug pages --udid <UDID>` | Resolve current pages through the active backend |
 | `ios-safari-debug backend get` | Print `wip`, `cdp`, or `stopped` |
 | `sudo ios-safari-debug backend set wip\|cdp` | Atomically switch services |
 | `ios-safari-debug ui` | Open the bundled human inspector |
 | `127.0.0.1:9221` / `9222-9322` | IWDP device and page endpoints |
 | `127.0.0.1:9333` | CDP discovery and browser WebSocket |
+| `127.0.0.1:9334` | Optional reconnecting single-client evaluation endpoint |
 | `127.0.0.1:8080` | Human Web Inspector |
 
 ## Downstream hardening
@@ -236,3 +261,61 @@ attachment or lost inspector transport is retried by UDID without restarting
 healthy device connections. This does not reload Safari pages or reset pairing.
 The package build runs a C lifecycle test that simulates a failing phone attach,
 successful retry, and later transport loss while preserving the iPad connection.
+
+### USB discovery versus inspector discovery
+
+`ios-safari-debug pages --udid <UDID>` uses the active WIP or CDP backend.
+For CDP it matches the device component of target IDs exactly; it never selects
+another connected device or simulator when the requested device is absent.
+
+If `lsusb` sees an Apple device but `timeout 5 idevice_id -l` cannot enumerate
+it, the failure is below the inspector bridge. Restarting the bridge cannot
+repair a stalled usbmuxd. Do not delete pairing records or assume a mounted
+photo volume proves a USB interface conflict.
+
+For a responsive usbmuxd with missed device discovery, its existing systemd
+mode supports a rescan without restarting:
+
+```sh
+sudo systemctl kill --kill-who=main --signal=SIGUSR2 usbmuxd.service
+timeout 5 idevice_id -l
+```
+
+This signal schedules `usb_discover()` in the daemon's event loop; existing
+enumerated devices are retained. It cannot recover an event loop stuck in USB
+teardown. SIGUSR1 requests exit and is **not** the rescan signal. Never send
+signals to an arbitrary process; the command targets the service main process.
+
+On September 21, 2026, this host's usbmuxd 1.1.1-5~exp3ubuntu2.1 logged an iPad
+attach followed 12 ms later by removal and “Cannot find device entry while
+removing USB device.” A later stop waited 90 seconds and required SIGKILL.
+The daemon masks SIGTERM and SIGUSR2 outside its main `ppoll()` call, so this
+is consistent with a stuck USB processing/teardown path, rather than a missing
+CDP page. The old process was already gone before a stack trace could be taken;
+the exact blocking call and any role of the desktop photo mount remain unproven.
+The kernel also loaded `apple-mfi-fastcharge` at the initial attach; a device
+driver rebinding/configuration race is another candidate trigger. Upstream
+[issue 163](https://github.com/libimobiledevice/usbmuxd/issues/163) reports the
+same log sequence and discusses this driver. No kernel driver settings were
+changed on this host during the investigation.
+
+Upstream [issue 114](https://github.com/libimobiledevice/usbmuxd/issues/114)
+describes this class of teardown hang and links
+[fix 63d1164](https://github.com/libimobiledevice/usbmuxd/commit/63d1164e736d7419198d1b737d10a9aae85bef98).
+Inspection of the exact installed Ubuntu source confirms that fix is absent.
+The AppMana daemon package includes this fix. Its regression fails on the stock
+source and passes on the patched source, including memory-sanitizer checks.
+Physical-iPad tests verified recovery after a forced daemon failure and after
+a paused USB transport resumed, without manually restarting either bridge
+process or changing pairing records. This does not establish the cause of every
+USB hang; preserve the journal and daemon stacks if another failure occurs.
+
+USB, lockdown and TLS handshakes have bounded deadlines so an unresponsive
+daemon cannot occupy discovery forever. For automated evaluation, configure
+`SAFARI_TARGET_URL=https://your-site.example/` in
+`/etc/ios-safari-debug/evaluate.env`, switch to the CDP backend, then run
+`sudo systemctl enable --now ios-safari-debug-evaluate`. The endpoint at
+`http://127.0.0.1:9334` accepts JavaScript in a POST body and exposes `/health`.
+It rediscovers the actual Safari target after disconnects, rejects ambiguous
+tabs, and never automatically replays a timed-out command. Use this endpoint
+instead of opening an additional inspector client for the same page.

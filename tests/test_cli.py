@@ -4,7 +4,7 @@ import importlib.util
 import io
 import unittest
 from argparse import Namespace
-from contextlib import redirect_stdout
+from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -17,6 +17,40 @@ SPEC.loader.exec_module(cli)
 
 
 class CliTests(unittest.TestCase):
+    @patch.object(cli, "backend", return_value="cdp")
+    @patch.object(cli, "fetch_json")
+    def test_cdp_pages_selects_exact_device(self, fetch: MagicMock, _: MagicMock) -> None:
+        ipad = {"id": "device:ipad:PID:123:4", "url": "https://example.com"}
+        fetch.return_value = [
+            {"id": "device:ipad-other:PID:123:4"},
+            {"id": "sim:ipad:PID:123:4"}, ipad,
+        ]
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(cli.cmd_pages(Namespace(udid="ipad")), 0)
+        self.assertEqual(cli.json.loads(output.getvalue()), [ipad])
+        fetch.assert_called_once_with("http://127.0.0.1:9333/json/list")
+
+    @patch.object(cli, "backend", return_value="cdp")
+    @patch.object(cli, "fetch_json", return_value=[{"id": "device:phone:PID:123:4"}])
+    def test_cdp_missing_device_fails(self, _: MagicMock, _backend: MagicMock) -> None:
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(cli.cmd_pages(Namespace(udid="ipad")), 2)
+
+    @patch.object(cli, "backend", return_value="stopped")
+    @patch.object(cli, "fetch_json")
+    def test_pages_stopped_backend_does_not_fetch(self, fetch: MagicMock, _: MagicMock) -> None:
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(cli.cmd_pages(Namespace(udid="ipad")), 2)
+        fetch.assert_not_called()
+
+    @patch.object(cli, "backend", return_value="wip")
+    @patch.object(cli, "wip_pages", return_value=[{"id": "ipad-page"}])
+    def test_pages_uses_active_wip(self, pages: MagicMock, _: MagicMock) -> None:
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.cmd_pages(Namespace(udid="ipad")), 0)
+        pages.assert_called_once_with("ipad")
+
     @patch.object(cli, "fetch_json")
     def test_pages_resolves_device_after_ports_swap(self, fetch: MagicMock) -> None:
         fetch.side_effect = [
