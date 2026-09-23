@@ -1,0 +1,22 @@
+[Unit]
+Description=Reconnecting single-client Safari evaluation endpoint
+Wants=ios-safari-debug-cdp.service
+After=ios-safari-debug-cdp.service
+
+[Service]
+Type=simple
+User=ios-safari-debug
+Group=ios-safari-debug
+EnvironmentFile=-/etc/ios-safari-debug/evaluate.env
+ExecStart=/usr/bin/ios-safari-cdp-evaluate
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

@@ -774,13 +774,15 @@ function warnOnce(key: string, message: string) {
 }
 
 async function openDeviceSource(d: usbmux.Device): Promise<Source | null> {
+  let lockdown: LockdownClient | undefined;
+  let wi: WebInspectorClient | undefined;
   try {
     const pair = await usbmux.readPairRecord(d.Properties.SerialNumber);
-    const lockdown = await LockdownClient.open(d, pair);
+    lockdown = await LockdownClient.open(d, pair);
     await lockdown.startSession();
     const svc = await lockdown.startService("com.apple.webinspector");
     const { socket, stream } = await lockdown.connectService(svc);
-    const wi = new WebInspectorClient(socket, stream);
+    wi = new WebInspectorClient(socket, stream);
     await wi.reportIdentifier();
     discoveryWarned.delete(`device:${d.Properties.SerialNumber}`);
     return {
@@ -791,6 +793,8 @@ async function openDeviceSource(d: usbmux.Device): Promise<Source | null> {
       lockdown,
     };
   } catch (e) {
+    wi?.close();
+    lockdown?.close();
     warnOnce(
       `device:${d.Properties.SerialNumber}`,
       `device ${d.Properties.SerialNumber}: ${(e as Error).message}`,

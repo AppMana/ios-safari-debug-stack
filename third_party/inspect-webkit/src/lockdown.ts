@@ -16,6 +16,7 @@ import { encodeXml, decodeXml, type PlistValue } from "./plist";
 import * as usbmux from "./usbmux";
 import { ByteStream } from "./stream";
 import { attachStream, type AnySocket } from "./socket";
+import { withDeadline } from "./deadline";
 
 const LOCKDOWN_PORT = 62078;
 const debug = (...args: unknown[]) => {
@@ -31,6 +32,7 @@ export type ServiceDescriptor = {
 async function readFrame(stream: ByteStream): Promise<Record<string, PlistValue>> {
   const lenBuf = await stream.read(4);
   const len = new DataView(lenBuf.buffer, lenBuf.byteOffset, 4).getUint32(0, false);
+  if (len === 0 || len > 16 * 1024 * 1024) throw new Error(`invalid lockdown frame length ${len}`);
   const body = await stream.read(len);
   return decodeXml(body) as Record<string, PlistValue>;
 }
@@ -57,7 +59,6 @@ function upgradeSocketTLS(
   pair: usbmux.PairRecord,
   label: string,
 ): Promise<{ socket: tls.TLSSocket; stream: ByteStream; detach: () => void }> {
-  return new Promise((resolve, reject) => {
     detach();
     const newStream = new ByteStream();
     const tlsSocket = tls.connect({
@@ -67,9 +68,11 @@ function upgradeSocketTLS(
       ca: Buffer.from(pair.RootCertificate),
       rejectUnauthorized: false,
     });
+  return withDeadline(() => new Promise((resolve, reject) => {
     const onError = (err: Error) => {
       debug(`${label} tls error:`, err);
       newStream.close(err);
+      tlsSocket.destroy();
       reject(err);
     };
     tlsSocket.once("error", onError);
@@ -79,7 +82,7 @@ function upgradeSocketTLS(
       const newDetach = attachStream(tlsSocket, newStream);
       resolve({ socket: tlsSocket, stream: newStream, detach: newDetach });
     });
-  });
+  }), error => { newStream.close(error); tlsSocket.destroy(error); }, `${label} TLS handshake`);
 }
 
 export class LockdownClient {
@@ -108,25 +111,35 @@ export class LockdownClient {
       device.DeviceID,
       detach,
     );
+    try {
     debug("sending QueryType");
-    writeFrame(socket, { Request: "QueryType" });
-    const r = await readFrame(stream);
+    const r = await c.request({ Request: "QueryType" });
     debug("QueryType reply:", r);
     expect(r, "QueryType");
     if (r.Type !== "com.apple.mobile.lockdown") {
       throw new Error(`unexpected lockdown Type: ${String(r.Type)}`);
     }
     return c;
+    } catch (error) {
+      c.close();
+      throw error;
+    }
+  }
+
+  private request(payload: Record<string, PlistValue>) {
+    return withDeadline(async () => {
+      writeFrame(this.socket, payload);
+      return await readFrame(this.stream);
+    }, error => { this.stream.close(error); this.socket.destroy(error); }, `lockdown ${payload.Request}`);
   }
 
   async startSession(): Promise<void> {
     debug("StartSession with HostID", this.pair.HostID);
-    writeFrame(this.socket, {
+    const r = await this.request({
       Request: "StartSession",
       HostID: this.pair.HostID,
       SystemBUID: this.pair.SystemBUID,
     });
-    const r = await readFrame(this.stream);
     debug("StartSession reply:", r);
     expect(r, "StartSession");
     if (r.EnableSessionSSL) {
@@ -141,8 +154,7 @@ export class LockdownClient {
 
   async startService(name: string): Promise<ServiceDescriptor> {
     debug("StartService", name);
-    writeFrame(this.socket, { Request: "StartService", Service: name });
-    const r = await readFrame(this.stream);
+    const r = await this.request({ Request: "StartService", Service: name });
     debug("StartService reply:", r);
     expect(r, "StartService");
     return {
@@ -166,6 +178,7 @@ export class LockdownClient {
   }
 
   close() {
-    this.socket.end();
+    this.stream.close();
+    this.socket.destroy();
   }
 }

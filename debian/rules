@@ -26,6 +26,11 @@ override_dh_auto_build:
 		--external:bufferutil --external:utf-8-validate \
 		--outfile=$(BUILD_DIR)/ios-safari-cdp-bridge
 	chmod 0755 $(BUILD_DIR)/ios-safari-cdp-bridge
+	esbuild third_party/inspect-webkit/bin/evaluate.ts \
+		--bundle --platform=node --target=node18 \
+		--external:bufferutil --external:utf-8-validate \
+		--outfile=$(BUILD_DIR)/ios-safari-cdp-evaluate
+	chmod 0755 $(BUILD_DIR)/ios-safari-cdp-evaluate
 
 override_dh_auto_test:
 	python3 -m unittest discover -s tests -v
@@ -38,12 +43,14 @@ override_dh_auto_test:
 override_dh_auto_install:
 	install -D -m 0755 $(BUILD_DIR)/iwdp/src/ios_webkit_debug_proxy $(PKG_DIR)/usr/bin/ios_webkit_debug_proxy
 	install -D -m 0755 $(BUILD_DIR)/ios-safari-cdp-bridge $(PKG_DIR)/usr/bin/ios-safari-cdp-bridge
+	install -D -m 0755 $(BUILD_DIR)/ios-safari-cdp-evaluate $(PKG_DIR)/usr/bin/ios-safari-cdp-evaluate
 	install -D -m 0755 src/ios_safari_debug.py $(PKG_DIR)/usr/bin/ios-safari-debug
 	install -D -m 0644 VERSION.json $(PKG_DIR)/usr/share/ios-safari-debug-stack/VERSION.json
 	install -d $(PKG_DIR)/usr/share/ios-safari-debug-stack/web-inspector
 	cp -a third_party/web-inspector-ui/. $(PKG_DIR)/usr/share/ios-safari-debug-stack/web-inspector/
 	install -D -m 0644 systemd/ios-safari-debug-wip.service $(PKG_DIR)/usr/lib/systemd/system/ios-safari-debug-wip.service
 	install -D -m 0644 systemd/ios-safari-debug-cdp.service $(PKG_DIR)/usr/lib/systemd/system/ios-safari-debug-cdp.service
+	install -D -m 0644 systemd/ios-safari-debug-evaluate.service $(PKG_DIR)/usr/lib/systemd/system/ios-safari-debug-evaluate.service
 	install -D -m 0644 systemd/ios-safari-debug-ui.service $(PKG_DIR)/usr/lib/systemd/system/ios-safari-debug-ui.service
 	install -D -m 0644 systemd/ios-safari-debug-stack.sysusers $(PKG_DIR)/usr/lib/sysusers.d/ios-safari-debug-stack.conf
 

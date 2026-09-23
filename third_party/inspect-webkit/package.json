@@ -22,7 +22,7 @@
   ],
   "scripts": {
     "cdp": "bun bin/cli.ts",
-    "build": "rm -rf dist && bun build bin/cli.ts --target=node --outfile dist/cli.js && bun build src/index.ts --target=node --outfile dist/index.js && tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && bun build bin/cli.ts --target=node --outfile dist/cli.js && bun build bin/evaluate.ts --target=node --outfile dist/evaluate.js && bun build src/index.ts --target=node --outfile dist/index.js && tsc -p tsconfig.build.json",
     "prepublishOnly": "bun run build",
     "test": "bun test"
   },
