@@ -12,7 +12,6 @@ if [ "$1" = "configure" ] && [ -d /run/systemd/system ]; then
     systemctl reset-failed usbmuxd.service 2>/dev/null || true
     udevadm control --reload-rules 2>/dev/null || true
     networkctl reload 2>/dev/null || true
-    modprobe -r ipheth 2>/dev/null || true
     for p in /sys/bus/usb/devices/usb*-port*/usb3_lpm_permit; do
         [ -w "$p" ] && printf '0\n' > "$p" 2>/dev/null || true
     done

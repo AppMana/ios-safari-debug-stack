@@ -13,5 +13,5 @@ test -f /usr/lib/systemd/system/ios-safari-debug-ui.service
 test -f /usr/lib/systemd/system/usbmuxd.service.d/10-ios-safari-preserve-pairing.conf
 test -f /usr/lib/systemd/system/usbmuxd.service.d/20-ios-safari-no-start-limit.conf
 test -f /usr/lib/systemd/network/05-ios-safari-ignore-ipheth.network
-test -f /usr/lib/modprobe.d/ios-safari-debug-stack.conf
+test ! -e /usr/lib/modprobe.d/ios-safari-debug-stack.conf
 test -f /usr/lib/udev/rules.d/38-ios-safari-usb-stability.rules

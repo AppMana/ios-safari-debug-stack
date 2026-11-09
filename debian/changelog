@@ -1,3 +1,11 @@
+ios-safari-debug-stack (0.2.4) noble; urgency=medium
+
+  * Drop kernel module blacklists for ipheth and apple_mfi_fastcharge so manual
+    USB tethering and fast-charge control remain available while networkd and
+    udev rules keep automatic probing disabled.
+
+ -- AppMana Engineering <engineering@appmana.com>  Mon, 09 Nov 2026 13:15:43 -0800
+
 ios-safari-debug-stack (0.2.3) noble; urgency=medium
 
   * Stabilize USB-C iOS links: blacklist ipheth and apple_mfi_fastcharge, mark
