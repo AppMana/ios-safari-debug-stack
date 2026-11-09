@@ -1,0 +1,6 @@
+[Match]
+Driver=ipheth
+
+[Link]
+Unmanaged=yes
+ActivationPolicy=down

@@ -1,0 +1,10 @@
+# Keep Intel JHL7540 Titan Ridge Thunderbolt/xHCI hierarchy out of runtime D3 suspend
+ACTION=="add", SUBSYSTEM=="pci", ATTR{vendor}=="0x8086", ATTR{device}=="0x15ea|0x15eb|0x15ec", ATTR{power/control}="on"
+ACTION=="add", SUBSYSTEM=="thunderbolt", ATTR{power/control}="on"
+
+# Disable USB3 U1/U2 LPM transitions on SuperSpeed root-hub ports
+ACTION=="add|bind", SUBSYSTEM=="usb", KERNEL=="usb*-port*", TEST=="usb3_lpm_permit", ATTR{usb3_lpm_permit}="0"
+
+# Prevent ModemManager, NetworkManager, and mtp-probe from probing iOS USB devices, and disable USB autosuspend
+ACTION=="add|bind", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="05ac", ATTR{idProduct}=="12[9a][0-9a-f]", ENV{ID_MM_DEVICE_IGNORE}="1", ENV{MTP_NO_PROBE}="1", ENV{NM_UNMANAGED}="1", ATTR{power/control}="on"
+SUBSYSTEM=="net", DRIVERS=="ipheth", ENV{NM_UNMANAGED}="1", ENV{ID_MM_DEVICE_IGNORE}="1"

@@ -7,10 +7,30 @@ fi
 
 #DEBHELPER#
 
-if [ "$1" = "configure" ] && [ -z "${2:-}" ] && [ -d /run/systemd/system ]; then
+if [ "$1" = "configure" ] && [ -d /run/systemd/system ]; then
     systemctl daemon-reload || true
-    systemctl enable ios-safari-debug-wip.service ios-safari-debug-ui.service || true
-    systemctl start ios-safari-debug-wip.service ios-safari-debug-ui.service || true
+    systemctl reset-failed usbmuxd.service 2>/dev/null || true
+    udevadm control --reload-rules 2>/dev/null || true
+    networkctl reload 2>/dev/null || true
+    modprobe -r ipheth 2>/dev/null || true
+    for p in /sys/bus/usb/devices/usb*-port*/usb3_lpm_permit; do
+        [ -w "$p" ] && printf '0\n' > "$p" 2>/dev/null || true
+    done
+    for d in /sys/bus/usb/devices/*; do
+        if [ -f "$d/idVendor" ] && [ "$(cat "$d/idVendor" 2>/dev/null)" = "05ac" ] && [ -w "$d/power/control" ]; then
+            printf 'on\n' > "$d/power/control" 2>/dev/null || true
+        fi
+    done
+    if [ -z "${2:-}" ]; then
+        systemctl enable ios-safari-debug-wip.service ios-safari-debug-ui.service || true
+        systemctl start ios-safari-debug-wip.service ios-safari-debug-ui.service || true
+    else
+        systemctl try-restart \
+            ios-safari-debug-cdp.service \
+            ios-safari-debug-evaluate.service \
+            ios-safari-debug-wip.service \
+            ios-safari-debug-ui.service || true
+    fi
 fi
 
 exit 0

@@ -1,3 +1,16 @@
+ios-safari-debug-stack (0.2.3) noble; urgency=medium
+
+  * Stabilize USB-C iOS links: blacklist ipheth and apple_mfi_fastcharge, mark
+    ipheth unmanaged in systemd-networkd, disable SuperSpeed USB3 U1/U2 LPM and
+    iOS USB autosuspend, and suppress ModemManager/mtp-probe device scans.
+  * Remove systemd start-rate limit on usbmuxd.service so rapid USB
+    re-enumeration never leaves the daemon failed in start-limit-hit.
+  * Require usbmuxd >= 1.1.1-5~exp3ubuntu2.1+appmana3 with bounded USB
+    disconnect transfer reaping.
+  * Streamline README to focus on overview, installation, and usage.
+
+ -- AppMana Engineering <engineering@appmana.com>  Mon, 09 Nov 2026 12:49:51 -0800
+
 ios-safari-debug-stack (0.2.2) noble; urgency=medium
 
   * Bound USB handshake waits and add a reconnecting evaluation service.
